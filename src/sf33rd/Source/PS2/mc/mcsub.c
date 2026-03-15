@@ -92,7 +92,7 @@ void MemcardInit() {
 
     do {
         ret = sceMcInit();
-        printf("McInit() = %d.\n", ret);
+        // printf("McInit() = %d.\n", ret);
     } while (ret < 0);
 }
 

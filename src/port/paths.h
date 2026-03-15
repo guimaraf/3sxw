@@ -8,4 +8,7 @@ const char* Paths_GetPrefPath();
 
 const char* Paths_GetBasePath();
 
+/// Get data directory path
+const char* Paths_GetDataPath();
+
 #endif

@@ -19,3 +19,7 @@ build
 temp
 third_party
 states
+
+# Temporary and original folders
+\!temp/
+\!original/

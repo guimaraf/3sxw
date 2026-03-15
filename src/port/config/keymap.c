@@ -152,7 +152,7 @@ static void initialize_empty_buttons() {
 }
 
 void Keymap_Init() {
-    const char* pref_path = Paths_GetPrefPath();
+    const char* pref_path = Paths_GetDataPath();
     char* keymap_path;
     SDL_asprintf(&keymap_path, "%skeymap", pref_path);
 

@@ -141,7 +141,7 @@ static bool dict_iterator(const char* key, const char* value) {
 }
 
 void Config_Init() {
-    const char* pref_path = Paths_GetPrefPath();
+    const char* pref_path = Paths_GetDataPath();
     char* config_path;
     SDL_asprintf(&config_path, "%sconfig", pref_path);
 

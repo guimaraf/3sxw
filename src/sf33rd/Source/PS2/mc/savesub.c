@@ -220,8 +220,7 @@ static void save_move_init(_save_work* save) {
             break;
         }
 
-        fatal_error("Not implemented");
-        // KnjInit(knj_type, (uintptr_t)save->fnt_adrs, 0x200, flPs2State.ZBuffAdrs);
+        KnjInit(8, (uintptr_t)save->fnt_adrs, 0x200, 0);
         load_data(icon_fnum[save->file_type], save->ico_adrs);
         save->r_no_1 += 1;
         /* fallthrough */
@@ -634,6 +633,7 @@ static void sel_slot_save(_save_work* save) {
 
         save->r_no_2 += 1;
 
+        printf("[SAVE] sel_slot_save: calling save_data_store then McActSaveSet slot=%d buf=%p\n", save->sel_slot_no, save->buf_adrs);
         save_data_store(save);
         McActSaveSet(save->sel_slot_no, save->buf_adrs);
         /* fallthrough */
@@ -1871,8 +1871,16 @@ static void save_data_store_system(_save_work* save) {
 
     memset(data, 0, sizeof(_save_data));
     Save_Game_Data();
+    printf("[SAVE] save_data_store_system: Present_Mode=%d\n", Present_Mode);
+    printf("[SAVE]   Difficulty=%d Time_Limit=%d Damage_Level=%d Auto_Save=%d\n",
+           save_w[Present_Mode].Difficulty, save_w[Present_Mode].Time_Limit,
+           save_w[Present_Mode].Damage_Level, save_w[Present_Mode].Auto_Save);
+    printf("[SAVE]   GuardCheck=%d AnalogStick=%d BgmType=%d SoundMode=%d\n",
+           save_w[Present_Mode].GuardCheck, save_w[Present_Mode].AnalogStick,
+           save_w[Present_Mode].BgmType, save_w[Present_Mode].SoundMode);
+    printf("[SAVE]   sizeof(_save_data)=%zu buf_adrs=%p\n", sizeof(_save_data), save->buf_adrs);
     memcpy(&data->save_w, &save_w[Present_Mode], sizeof(struct _SAVE_W));
-    encode_data((u16*)data, sizeof(_save_data));
+    encode_data((u16*)data, 0x218);
 
     pltype = mppGetFavoritePlayerNumber() - 1;
 
@@ -1963,11 +1971,16 @@ static s32 save_data_decode_system(_save_work* save, s32 mode) {
 
     decode_data(save, &data->head.version, 0x218);
 
+    printf("[SAVE] save_data_decode_system: mode=%d ver_err=%d sum_err=%d\n",
+           mode, save->mc_ver_err, save->mc_sum_err);
+
     if ((save->mc_ver_err != 0) || (save->mc_sum_err != 0)) {
         if (mode != 0) {
+            printf("[SAVE]   decode FAILED, returning -1\n");
             return -1;
         }
 
+        printf("[SAVE]   decode FAILED but mode=0, resetting to defaults\n");
         memset(data, 0, sizeof(*data));
         memcpy(&data->save_w, save_w, sizeof(data->save_w));
     }
@@ -2014,6 +2027,11 @@ static void load_data_set_system(_save_work* save) {
     s32 page;
     _save_data* data = (_save_data*)save->buf_adrs;
     struct _SAVE_W* sw = &save_w[Present_Mode];
+
+    printf("[LOAD] load_data_set_system: Present_Mode=%d\n", Present_Mode);
+    printf("[LOAD]   from file: Difficulty=%d Time_Limit=%d Damage_Level=%d Auto_Save=%d\n",
+           data->save_w.Difficulty, data->save_w.Time_Limit,
+           data->save_w.Damage_Level, data->save_w.Auto_Save);
 
     *sw = data->save_w;
 

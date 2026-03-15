@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(3sx LANGUAGES C)
+project(SF3 LANGUAGES C)
 
 # ======================================
 # Options and platform setup
@@ -24,7 +24,11 @@ include_directories(
 
 file(GLOB_RECURSE GAME_SRC src/*.c)
 
-add_executable(3sx MACOSX_BUNDLE
+if(WIN32)
+    list(APPEND GAME_SRC "${CMAKE_SOURCE_DIR}/src/sf3.rc")
+endif()
+
+add_executable(SF3 MACOSX_BUNDLE
     ${GAME_SRC}
 )
 
@@ -32,7 +36,7 @@ add_executable(3sx MACOSX_BUNDLE
 # Compiler and linker flags
 # ======================================
 
-target_compile_definitions(3sx PRIVATE
+target_compile_definitions(SF3 PRIVATE
     $<$<CONFIG:Debug>:DEBUG>
     $<$<CONFIG:Debug>:NETPLAY_ENABLED>
 
@@ -47,7 +51,7 @@ target_compile_definitions(3sx PRIVATE
 )
 
 # Feature toggles
-target_compile_definitions(3sx PRIVATE
+target_compile_definitions(SF3 PRIVATE
     MEMCARD_DISABLED
     # CPS3
 )
@@ -79,7 +83,7 @@ elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     )
 endif()
 
-target_compile_options(3sx PRIVATE
+target_compile_options(SF3 PRIVATE
     -Wall
     -Werror
 
@@ -91,18 +95,18 @@ target_compile_options(3sx PRIVATE
     $<$<CONFIG:Debug>:-Wno-unused-variable>
 )
 
-set_target_properties(3sx PROPERTIES
+set_target_properties(SF3 PROPERTIES
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/cmake/Info.plist"
 )
 
 if(APPLE)
-    set_target_properties(3sx PROPERTIES
+    set_target_properties(SF3 PROPERTIES
         OUTPUT_NAME "3SX"
         MACOSX_BUNDLE_BUNDLE_NAME "3SX"
         INSTALL_RPATH "@executable_path/../Frameworks"
     )
 elseif(UNIX AND NOT APPLE)
-    set_target_properties(3sx PROPERTIES
+    set_target_properties(SF3 PROPERTIES
         INSTALL_RPATH "\$ORIGIN/../lib"
     )
 endif()
@@ -132,7 +136,7 @@ include_directories(
     ${TF_PSA_CRYPTO_ROOT}/include
 )
 
-target_link_libraries(3sx PRIVATE
+target_link_libraries(SF3 PRIVATE
     m
     "${LIBCDIO_ROOT}/lib/libiso9660.a"
     "${LIBCDIO_ROOT}/lib/libcdio.a"
@@ -145,7 +149,7 @@ target_link_libraries(3sx PRIVATE
 )
 
 if(APPLE)
-    target_link_libraries(3sx PRIVATE
+    target_link_libraries(SF3 PRIVATE
         ${FFMPEG_ROOT}/lib/libavcodec.dylib
         ${FFMPEG_ROOT}/lib/libavformat.dylib
         ${FFMPEG_ROOT}/lib/libavutil.dylib
@@ -154,7 +158,7 @@ if(APPLE)
         iconv
     )
 elseif(WIN32)
-    target_link_libraries(3sx PRIVATE
+    target_link_libraries(SF3 PRIVATE
         ${FFMPEG_ROOT}/lib/libavcodec.dll.a
         ${FFMPEG_ROOT}/lib/libavformat.dll.a
         ${FFMPEG_ROOT}/lib/libavutil.dll.a
@@ -166,12 +170,12 @@ elseif(WIN32)
         ws2_32
         iphlpapi
     )
-    target_link_options(3sx PRIVATE
+    target_link_options(SF3 PRIVATE
         "$<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:--for-linker>"
-        "$<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:--pdb=3sx.pdb>"
+        "$<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:--pdb=SF3.pdb>"
     )
 elseif(UNIX)
-    target_link_libraries(3sx PRIVATE
+    target_link_libraries(SF3 PRIVATE
         ${FFMPEG_ROOT}/lib/libavcodec.so
         ${FFMPEG_ROOT}/lib/libavformat.so
         ${FFMPEG_ROOT}/lib/libavutil.so
@@ -190,7 +194,7 @@ set(PROJECT_LICENSE_FILES
 )
 
 if(APPLE)
-    install(TARGETS 3sx
+    install(TARGETS SF3
         RUNTIME DESTINATION bin
         BUNDLE DESTINATION .
     )
@@ -208,7 +212,7 @@ if(APPLE)
         DESTINATION 3SX.app/Contents/Resources/licenses
     )
 elseif(WIN32)
-    install(TARGETS 3sx
+    install(TARGETS SF3
 		RUNTIME_DEPENDENCY_SET deps
         RUNTIME DESTINATION bin
     )
@@ -227,7 +231,7 @@ elseif(WIN32)
 	)
 
     install(FILES
-        "$<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${CMAKE_CURRENT_BINARY_DIR}/3sx.pdb>"
+        "$<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${CMAKE_CURRENT_BINARY_DIR}/SF3.pdb>"
         DESTINATION bin
     )
 
@@ -236,7 +240,7 @@ elseif(WIN32)
         DESTINATION bin/licenses
     )
 elseif(UNIX)
-    install(TARGETS 3sx
+    install(TARGETS SF3
         RUNTIME DESTINATION bin
     )
 
@@ -250,7 +254,7 @@ elseif(UNIX)
 
     install(FILES
         ${PROJECT_LICENSE_FILES}
-        DESTINATION share/3sx/licenses
+        DESTINATION share/SF3/licenses
     )
 endif()
 
@@ -271,3 +275,4 @@ else(UNIX)
 endif()
 
 include(CPack)
+
