@@ -1,0 +1,220 @@
+Problema de Replay - Base para investigacao futura
+
+Resumo do problema
+
+- o sistema de save e load do jogo foi corrigido
+- os slots 1 e 2 do Memory Card estao funcionando corretamente
+- o replay pode ser salvo nos dois memory cards
+- porem, ao tentar visualizar o replay salvo, o jogo mostra:
+
+[File 00] BROKEN FILE
+
+Conclusao inicial
+
+- o problema nao parece estar mais na separacao de slots
+- o problema tambem nao parece estar no save principal de sistema
+- o problema parece estar no formato dos dados de replay gravados, ou na forma como o jogo le e valida esses dados depois
+
+Comportamento observado
+
+- save de replay executa normalmente
+- arquivos de replay sao gravados em disco
+- o jogo nao consegue interpretar corretamente o replay salvo
+- como o jogo nao consegue ler os metadados esperados, ele trata o arquivo como corrompido
+
+Pontos importantes ja consolidados
+
+- save de sistema funciona
+- autoload funciona
+- slot 1 e slot 2 funcionam
+- escolha do save mais recente funciona
+- replay chega a ser salvo em disco
+
+Projeto compilado e já funcional
+Os saves são criados com pastas separadas dentro da pasta slo1, por exemplo
+BASLUS-20949SF3R00 > primeiro replay salvo
+BASLUS-20949SF3R01 > segundo replay salvo
+BASLUS-20949SF3SYS > pasta do arquivo de save do jogo
+
+dentro da pasta BASLUS-20949SF3R00, contém os seguintes arquivos
+BASLUS-20949SF3R00		> 30kb	> arquivo sem extensão
+icon.sys				>  1kb  >
+icon20.ico				> 36kb  >
+sub.bin					>  1kb  >
+
+caminho da pasta onde estão estes arquivos, para validação de possível corrupção
+F:\GitRevised\3sxw\build\application\bin\data\saves\slot1\BASLUS-20949SF3R00
+
+-
+Logo, o problema atual esta concentrado no fluxo de replay.
+
+Arquivos mais provaveis para investigacao
+
+- src/sf33rd/Source/PS2/mc/savesub.c
+- src/sf33rd/Source/PS2/mc/mcsub.c
+- include/sf33rd/Source/PS2/mc/savesub.h
+
+Pontos do codigo relevantes
+
+1. Gravacao do replay
+
+- funcao: save_data_store_replay
+- arquivo: src/sf33rd/Source/PS2/mc/savesub.c
+- referencia aproximada: linha 1908
+
+Esta funcao prepara a estrutura _replay_data e tambem escreve um bloco auxiliar _sub_info logo depois de data.
+
+2. Decode do replay
+
+- funcao: save_data_decode_replay
+- arquivo: src/sf33rd/Source/PS2/mc/savesub.c
+- referencia aproximada: linha 2003
+
+Esta funcao decodifica o replay e falha se houver erro de versao ou checksum.
+
+3. Carga do replay
+
+- funcao: load_data_set_replay
+- arquivo: src/sf33rd/Source/PS2/mc/savesub.c
+- referencia aproximada: linha 2103
+
+4. Tela que mostra BROKEN FILE
+
+- arquivo: src/sf33rd/Source/PS2/mc/savesub.c
+- referencia aproximada: linha 2337
+
+O texto BROKEN FILE aparece quando os metadados do arquivo listados no menu sao considerados invalidos.
+
+5. Estruturas do replay
+
+- arquivo: include/sf33rd/Source/PS2/mc/savesub.h
+- estruturas relevantes:
+  - _sub_info
+  - _replay_data
+
+6. Arquivo auxiliar do replay no memory card
+
+- arquivo: src/sf33rd/Source/PS2/mc/mcsub.c
+- replay principal: BASLUS-20949SF3R
+- arquivo auxiliar: sub.bin
+- tamanho de sub.bin: 0x10
+
+Hipotese principal
+
+A hipotese mais forte hoje e esta:
+
+- o replay principal esta sendo salvo
+- porem os metadados auxiliares do replay, especialmente o bloco _sub_info usado pela listagem, nao estao sendo preenchidos completamente antes de salvar
+
+Motivo tecnico
+
+A estrutura _sub_info e:
+
+- struct memcard_date date
+- s32 player[2]
+
+Na funcao save_data_store_replay, foi observado que:
+
+- os campos player[] sao preenchidos
+- mas o campo date do _sub_info nao esta sendo preenchido explicitamente antes do save
+
+Isso e um suspeito muito forte, porque:
+
+- a listagem do menu usa info->date
+- a validacao em info_data_check exige:
+  - ano valido
+  - mes valido
+  - dia valido
+  - hora valida
+  - minuto valido
+  - segundo valido
+  - dayofweek valido
+  - players validos
+
+Se o bloco _sub_info tiver uma data nao inicializada ou lixo de memoria:
+
+- a validacao falha
+- o jogo marca o arquivo como quebrado
+- a UI mostra BROKEN FILE
+
+Trecho importante da logica
+
+Em savesub.c:
+
+- para replay, a UI imprime BROKEN FILE quando md->dayofweek >= 254
+- durante a validacao/listagem, campos invalidos fazem o jogo tratar o replay como corrompido
+
+Isso combina muito com um sub.bin salvo com metadados incompletos.
+
+Hipoteses secundarias
+
+1. Encode/decode do replay principal
+
+- o encode_data ou decode_data pode nao estar funcionando corretamente para _replay_data
+- isso pode gerar erro de checksum ou versao
+
+2. Tamanho ou layout da estrutura _REPLAY_W
+
+- pode haver incompatibilidade de layout, alinhamento ou dados nao inicializados dentro de _REPLAY_W
+- isso pode afetar checksum, decode ou leitura posterior
+
+3. Arquivo auxiliar sub.bin incompleto
+
+- o mcsub grava file[4] e file[5]
+- para replay, file[5] e sub.bin
+- se o buffer de sub.bin nao for preenchido corretamente, a listagem quebra mesmo com o replay principal salvo
+
+4. Campos nao inicializados no replay antes do encode
+
+- algum campo de _REPLAY_W, _replay_data ou _sub_info pode conter lixo de memoria
+- isso pode afetar checksum ou validacao do arquivo
+
+Prioridade de investigacao recomendada
+
+1. Verificar o conteudo salvo de sub.bin
+
+- confirmar se date dentro de _sub_info esta sendo gravado com valores validos
+- confirmar se player[0] e player[1] estao corretos
+
+2. Corrigir save_data_store_replay para preencher explicitamente _sub_info.date
+
+- esta e hoje a correcao candidata mais forte
+- provavelmente precisa gravar data/hora atual e dayofweek valido
+
+3. Adicionar logs temporarios em:
+
+- save_data_store_replay
+- save_data_decode_replay
+- info_data_check
+- load_data_set_replay
+
+Objetivo dos logs:
+
+- ver se o replay quebra no momento do save
+- ou se quebra apenas na leitura/listagem
+
+4. Validar checksum e versao do replay
+
+- confirmar se save->mc_ver_err ou save->mc_sum_err ficam ativos no replay
+
+5. Comparar replay salvo contra um replay valido conhecido, se existir
+
+- comparar tamanho
+- comparar cabecalho
+- comparar sub.bin
+
+Resultado esperado de uma possivel correcao
+
+- replay continua salvando normalmente
+- a listagem deixa de mostrar BROKEN FILE
+- o replay passa a aparecer com data valida e nomes/personagens corretos
+- o replay pode ser carregado normalmente pelo jogo
+
+Observacao importante
+
+Como o save de replay ja esta sendo gravado em disco e os slots funcionam, este problema deve ser tratado em um chat separado, focado apenas no fluxo de replay.
+
+Suspeita tecnica mais forte neste momento
+
+- o arquivo sub.bin do replay esta sendo salvo com o campo date de _sub_info sem inicializacao correta
+- por isso o jogo entende o replay como corrompido durante a listagem

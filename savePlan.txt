@@ -151,7 +151,18 @@ Risco:
 
 Status:
 
-- pendente
+- absorvida pelas etapas 1 e 2
+
+Analise final da etapa:
+
+- a separacao real de leitura, listagem e criacao por slot ja foi coberta pelas etapas 1 e 2
+- os testes praticos confirmaram que save e load de um slot nao afetam o outro
+- o jogo nao expoe delete de save ao usuario, entao esta parte nao foi relevante para validacao funcional atual
+
+Conclusao:
+
+- nao ha necessidade de uma implementacao separada para esta etapa
+- etapa considerada verificada no contexto atual do projeto
 
 Etapa 4 - Manter ambos os cards sempre presentes e formatados
 
@@ -177,7 +188,26 @@ Observacao:
 
 Status:
 
-- pendente
+- concluida
+
+Resumo da etapa concluida:
+
+- sceMcGetInfo responde por slot
+- ambos os slots sao tratados como memory cards PS2 validos
+- ambos os slots sao tratados como formatados
+- ambos os slots reportam espaco livre inicial valido
+
+Validacao tecnica:
+
+- o backend atual usa o port normalizado por slot em sceMcGetInfo
+- o retorno atual informa tipo sceMcTypePS2
+- o retorno atual informa format = 1
+- o retorno atual informa espaco livre fixo valido para uso do jogo
+
+Conclusao:
+
+- fase 4 ja estava implementada no backend atual
+- nenhuma mudanca adicional foi necessaria para consolidar esta fase
 
 Etapa 5 - Validar autoload e save/load com os dois slots
 
