@@ -19,10 +19,13 @@
 
 #define MAX_OPEN_FILES 16
 #define MC_SAVES_DIR "saves/"
+#define MC_SLOT1_DIR "slot1/"
+#define MC_SLOT2_DIR "slot2/"
 
 typedef void (*OperationFinalizer)(int* result);
 
 typedef struct GetInfoOperation {
+    int port;
     int* type;
     int* free;
     int* format;
@@ -44,6 +47,7 @@ typedef struct ReadWriteOperation {
 } ReadWriteOperation;
 
 typedef struct GetDirOperation {
+    int port;
     char* name;
     int mode;
     int maxent;
@@ -60,20 +64,39 @@ static int registered_operation = 0;
 static SDL_IOStream* open_files[MAX_OPEN_FILES] = { NULL };
 
 // Helpers
-static char* get_mc_path(const char* name) {
+static int normalize_mc_port(int port) {
+    return port == 1 ? 1 : 0;
+}
+
+static const char* get_mc_slot_dir(int port) {
+    return normalize_mc_port(port) == 0 ? MC_SLOT1_DIR : MC_SLOT2_DIR;
+}
+
+static char* get_mc_root_path(int port) {
     const char* data_path = Paths_GetDataPath();
-    char* full_path = NULL;
     char* saves_dir = NULL;
-    
+    char* slot_dir = NULL;
+
     SDL_asprintf(&saves_dir, "%s%s", data_path, MC_SAVES_DIR);
     SDL_CreateDirectory(saves_dir);
-    
+
+    SDL_asprintf(&slot_dir, "%s%s", saves_dir, get_mc_slot_dir(port));
+    SDL_CreateDirectory(slot_dir);
+
+    SDL_free(saves_dir);
+    return slot_dir;
+}
+
+static char* get_mc_path(int port, const char* name) {
+    char* root_path = get_mc_root_path(port);
+    char* full_path = NULL;
+
     if (name[0] == '/') {
         name++; // Skip leading slash if any
     }
-    
-    SDL_asprintf(&full_path, "%s%s", saves_dir, name);
-    SDL_free(saves_dir);
+
+    SDL_asprintf(&full_path, "%s%s", root_path, name);
+    SDL_free(root_path);
     return full_path;
 }
 
@@ -191,7 +214,7 @@ static int SDLCALL get_dir_callback(void* userdata, const char* dirname, const c
 }
 
 static void finalize_get_dir(int* result) {
-    char* path = get_mc_path("");
+    char* path = get_mc_root_path(get_dir_operation.port);
     
     // The name passed to sceMcGetDir often has a leading slash
     const char* full_req = get_dir_operation.name;
@@ -269,6 +292,7 @@ int sceMcSync(int mode, int* cmd, int* result) {
 
 int sceMcGetInfo(int port, int slot, int* type, int* free, int* format) {
     registered_operation = sceMcFuncNoCardInfo;
+    get_info_operation.port = normalize_mc_port(port);
     get_info_operation.type = type;
     get_info_operation.free = free;
     get_info_operation.format = format;
@@ -277,7 +301,7 @@ int sceMcGetInfo(int port, int slot, int* type, int* free, int* format) {
 
 int sceMcOpen(int port, int slot, const char* name, int mode) {
     registered_operation = sceMcFuncNoOpen;
-    char* path = get_mc_path(name);
+    char* path = get_mc_path(port, name);
     
     int fd = alloc_fd();
     if (fd == -1) {
@@ -339,7 +363,7 @@ int sceMcWrite(int fd, const void* buffer, int size) {
 
 int sceMcMkdir(int port, int slot, const char* name) {
     registered_operation = sceMcFuncNoMkdir;
-    char* path = get_mc_path(name);
+    char* path = get_mc_path(port, name);
     debug_print("sceMcMkdir: %s", name);
     SDL_CreateDirectory(path);
     SDL_free(path);
@@ -348,7 +372,7 @@ int sceMcMkdir(int port, int slot, const char* name) {
 
 int sceMcDelete(int port, int slot, const char* name) {
     registered_operation = sceMcFuncNoDelete;
-    char* path = get_mc_path(name);
+    char* path = get_mc_path(port, name);
     debug_print("sceMcDelete: %s", name);
     SDL_RemovePath(path);
     SDL_free(path);
@@ -367,6 +391,7 @@ int sceMcUnformat(int port, int slot) {
 
 int sceMcGetDir(int port, int slot, const char* name, unsigned int mode, int maxent, sceMcTblGetDir* table) {
     registered_operation = sceMcFuncNoGetDir;
+    get_dir_operation.port = normalize_mc_port(port);
     get_dir_operation.name = SDL_strdup(name);
     get_dir_operation.mode = mode;
     get_dir_operation.maxent = maxent;

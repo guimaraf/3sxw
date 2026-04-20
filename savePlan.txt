@@ -1,0 +1,251 @@
+Plano de Implementacao - Slots de Memory Card
+
+Objetivo da fase
+
+Separar de forma real o slot 1 e o slot 2 do Memory Card no port para PC, sem compatibilidade com o layout antigo de saves e sem alterar agora o tamanho do card virtual.
+
+Resultado final esperado desta fase:
+
+- slot 1 e slot 2 com diretorios fisicos independentes
+- autoload no boot lendo os dois slots corretamente
+- menu de save/load operando separadamente em cada slot
+- salvar em um slot sem afetar o outro
+- replay salvo em um slot sem afetar o outro
+
+Arquivos previstos para alteracao nesta fase
+
+- src/port/sdk/sdk_libmc.c
+- opcionalmente documentacao depois, fora desta fase
+
+Layout alvo
+
+- data/saves/slot1/
+- data/saves/slot2/
+
+Dentro de cada slot, o jogo continuara usando os diretorios e arquivos normais:
+
+- data/saves/slot1/BASLUS-20949SF3SYS/
+- data/saves/slot2/BASLUS-20949SF3SYS/
+
+Nao havera compatibilidade com o layout antigo.
+Nao havera migracao automatica.
+Os dois cards virtuais serao considerados presentes e formatados nesta primeira versao.
+
+Etapa 1 - Mapear caminho por slot
+
+Implementacao:
+
+- substituir a logica atual que sempre usa data/saves/
+- criar uma funcao central para resolver o root do card por port
+- mapeamento:
+  - port 0 -> data/saves/slot1/
+  - port 1 -> data/saves/slot2/
+
+Resultado esperado:
+
+- qualquer operacao de arquivo do card passa a ter um root diferente por slot
+- slot 1 e slot 2 deixam de compartilhar o mesmo diretorio fisico
+
+Risco:
+
+- baixo, desde que toda operacao passe pela funcao central
+
+Status:
+
+- concluida
+
+Resumo da etapa concluida:
+
+- criado root fisico separado por port no backend
+- port 0 agora resolve para data/saves/slot1/
+- port 1 agora resolve para data/saves/slot2/
+- operacoes de open, mkdir, delete e getdir passaram a usar o root do slot correto
+
+Validacao em teste real:
+
+- slot 1 salvo com dificuldade em 1 estrela
+- slot 2 salvo com dificuldade no maximo de estrelas
+- arquivos gravados corretamente em disco
+- no boot, o autoload carregou corretamente o save do slot 1
+- no menu, o load manual do slot 2 carregou corretamente o save do slot 2
+
+Conclusao:
+
+- Etapa 1 validada com exito em teste pratico
+
+Etapa 2 - Fazer as operacoes assincronas carregarem o port
+
+Implementacao:
+
+- ajustar as structs de operacao para registrar o port da chamada
+- garantir que sceMcGetDir, sceMcOpen, sceMcMkdir, sceMcDelete e sceMcGetInfo finalizem usando o slot correto
+
+Resultado esperado:
+
+- a operacao iniciada para slot 1 termina em slot 1
+- a operacao iniciada para slot 2 termina em slot 2
+- nao existe mais vazamento entre slots
+
+Risco:
+
+- medio, porque um erro aqui pode fazer uma funcao usar o slot errado sem ser obvio
+
+Status:
+
+- pendente
+
+Etapa 3 - Separar leitura, listagem, criacao e remocao por slot
+
+Implementacao:
+
+- revisar estas funcoes:
+  - sceMcGetInfo
+  - sceMcOpen
+  - sceMcMkdir
+  - sceMcDelete
+  - sceMcGetDir
+- todas precisam montar caminho baseado no port
+- o diretorio do slot deve ser criado automaticamente quando necessario
+
+Resultado esperado:
+
+- salvar em um slot nao cria arquivos no outro
+- listar arquivos no slot 1 nao mostra conteudo do slot 2
+- apagar no slot 2 nao afeta o slot 1
+
+Risco:
+
+- baixo a medio, principalmente em sceMcGetDir
+
+Status:
+
+- pendente
+
+Etapa 4 - Manter ambos os cards sempre presentes e formatados
+
+Implementacao:
+
+- sceMcGetInfo continuara simulando dois memory cards validos
+- ambos presentes
+- ambos formatados
+- ambos com espaco livre inicial valido
+
+Resultado esperado:
+
+- o jogo sempre enxerga dois cards disponiveis
+- a UI continua funcionando como no console, mas agora com separacao real
+
+Risco:
+
+- baixo
+
+Observacao:
+
+- nesta fase nao vamos simular sem card inserido nem card desformatado
+
+Status:
+
+- pendente
+
+Etapa 5 - Validar autoload e save/load com os dois slots
+
+Implementacao:
+
+- nenhuma mudanca de codigo nova aqui; esta etapa e de validacao
+- compilacao e testes locais serao feitos fora do editor
+
+Resultado esperado:
+
+- o boot le slot 1 e slot 2 separadamente
+- se houver save em apenas um dos slots, ele carrega esse
+- se houver save nos dois, o jogo escolhe o mais recente
+- o menu de save/load mostra os dois cards separados
+
+Risco:
+
+- baixo
+
+Status:
+
+- pendente
+
+Roteiro de teste recomendado
+
+1. Ambiente limpo
+
+- apagar data/saves/
+- iniciar o jogo
+- verificar se ambos os slots aparecem vazios e funcionais
+
+Resultado esperado:
+
+- nenhum save encontrado
+- sem erro fatal
+- ambos os slots disponiveis
+
+2. Save so no slot 1
+
+- criar save no slot 1
+- confirmar que o slot 2 continua vazio
+- reiniciar o jogo
+
+Resultado esperado:
+
+- autoload vindo so do slot 1
+- menu mostra save apenas no slot 1
+
+3. Save so no slot 2
+
+- limpar saves
+- criar save apenas no slot 2
+- reiniciar o jogo
+
+Resultado esperado:
+
+- autoload vindo so do slot 2
+- menu mostra save apenas no slot 2
+
+4. Save nos dois slots
+
+- criar save no slot 1
+- depois criar outro mais novo no slot 2
+- reiniciar o jogo
+
+Resultado esperado:
+
+- o boot escolhe o mais recente
+- se inverter a ordem, a escolha deve inverter tambem
+
+5. Isolamento entre slots
+
+- alterar opcoes no save de um slot
+- verificar se o outro continua intacto
+
+Resultado esperado:
+
+- cada slot mantem seu proprio conteudo
+
+6. Replay
+
+- salvar replay em um slot
+- verificar se o outro nao recebe arquivos
+
+Resultado esperado:
+
+- replay isolado por slot
+
+Criterio de encerramento da fase
+
+A fase pode ser considerada concluida quando:
+
+- slot 1 e slot 2 tiverem diretorios fisicos independentes
+- boot autoload consultar os dois corretamente
+- menu de save/load operar separadamente em cada slot
+- salvar em um slot nao afetar o outro
+- replay tambem respeitar a separacao
+
+Observacoes operacionais
+
+- vamos atualizar este arquivo conforme cada etapa avancar
+- a compilacao sera feita localmente
+- os testes serao reportados depois para analise e possiveis ajustes
