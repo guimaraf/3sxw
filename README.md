@@ -39,7 +39,7 @@ In the original game, the character **Gill** must be unlocked by clearing the ga
 
 ## Resources
 
-Find instructions on [how to build](docs/building.md) the project and other useful resources in the [docs](docs) folder.
+Find instructions on how to build the project for [Windows](docs/buildWindows.md), [Linux](docs/buildLinux.md) or [macOS](docs/buildMac.md) and other useful resources in the [docs](docs) folder.
 
 ---
 
@@ -112,7 +112,7 @@ No jogo original, o personagem **Gill** precisa ser desbloqueado terminando o jo
 
 ## Resources
 
-Encontre instruções sobre [como compilar](docs/building.md) o projeto e outros recursos úteis na pasta [docs](docs).
+Encontre instruções sobre como compilar o projeto para [Windows](docs/buildWindows.md), [Linux](docs/buildLinux.md) ou [macOS](docs/buildMac.md) e outros recursos úteis na pasta [docs](docs).
 
 ---
 

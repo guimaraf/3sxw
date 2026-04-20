@@ -52,7 +52,6 @@ target_compile_definitions(SF3 PRIVATE
 
 # Feature toggles
 target_compile_definitions(SF3 PRIVATE
-    MEMCARD_DISABLED
     # CPS3
 )
 
@@ -275,4 +274,3 @@ else(UNIX)
 endif()
 
 include(CPack)
-
