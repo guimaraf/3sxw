@@ -32,7 +32,9 @@ typedef struct GetInfoOperation {
 } GetInfoOperation;
 
 typedef struct OpenOperation {
+    int port;
     int fd;
+    char* path;
 } OpenOperation;
 
 typedef struct CloseOperation {
@@ -54,14 +56,49 @@ typedef struct GetDirOperation {
     sceMcTblGetDir* table;
 } GetDirOperation;
 
+typedef struct PathOperation {
+    int port;
+    char* path;
+} PathOperation;
+
 static GetInfoOperation get_info_operation = { 0 };
 static OpenOperation open_operation = { 0 };
 static CloseOperation close_operation = { 0 };
 static ReadWriteOperation rw_operation = { 0 };
 static GetDirOperation get_dir_operation = { 0 };
+static PathOperation mkdir_operation = { 0 };
+static PathOperation delete_operation = { 0 };
 static int registered_operation = 0;
 
 static SDL_IOStream* open_files[MAX_OPEN_FILES] = { NULL };
+
+static void clear_open_operation(void) {
+    if (open_operation.path) {
+        SDL_free(open_operation.path);
+        open_operation.path = NULL;
+    }
+}
+
+static void clear_get_dir_operation(void) {
+    if (get_dir_operation.name) {
+        SDL_free(get_dir_operation.name);
+        get_dir_operation.name = NULL;
+    }
+}
+
+static void clear_path_operation(PathOperation* operation) {
+    if (operation->path) {
+        SDL_free(operation->path);
+        operation->path = NULL;
+    }
+}
+
+static void clear_registered_operation_state(void) {
+    clear_open_operation();
+    clear_get_dir_operation();
+    clear_path_operation(&mkdir_operation);
+    clear_path_operation(&delete_operation);
+}
 
 // Helpers
 static int normalize_mc_port(int port) {
@@ -111,11 +148,14 @@ static int alloc_fd() {
 
 // Finalizers
 static void finalize_get_info(int* result) {
+    char* root_path = get_mc_root_path(get_info_operation.port);
+
     // Pretend we have a formatted 8MB PS2 memory card
     *get_info_operation.type = sceMcTypePS2;
     *get_info_operation.free = 0x1F03; // ~8000 KB free
     *get_info_operation.format = 1;
 
+    SDL_free(root_path);
     *result = sceMcResSucceed;
 }
 
@@ -145,7 +185,19 @@ static void finalize_write(int* result) {
     }
 }
 
-static void finalize_path_op(int* result) {
+static void finalize_mkdir(int* result) {
+    if (mkdir_operation.path) {
+        SDL_CreateDirectory(mkdir_operation.path);
+    }
+
+    *result = sceMcResSucceed;
+}
+
+static void finalize_delete(int* result) {
+    if (delete_operation.path) {
+        SDL_RemovePath(delete_operation.path);
+    }
+
     *result = sceMcResSucceed;
 }
 
@@ -155,6 +207,29 @@ typedef struct {
     sceMcTblGetDir* table;
     const char* pattern;
 } EnumerateDirData;
+
+static void fill_mc_datetime(sceMcStDateTime* dst, SDL_Time time_value) {
+    SDL_DateTime dt;
+
+    SDL_memset(dst, 0, sizeof(*dst));
+
+    if (time_value > 0 && SDL_TimeToDateTime(time_value, &dt, true)) {
+        dst->Sec = (unsigned char)dt.second;
+        dst->Min = (unsigned char)dt.minute;
+        dst->Hour = (unsigned char)dt.hour;
+        dst->Day = (unsigned char)dt.day;
+        dst->Month = (unsigned char)dt.month;
+        dst->Year = (unsigned short)dt.year;
+        return;
+    }
+
+    dst->Sec = 0;
+    dst->Min = 0;
+    dst->Hour = 12;
+    dst->Day = 1;
+    dst->Month = 1;
+    dst->Year = 2026;
+}
 
 // Simple wildcard match (only matches * at the end for now)
 static bool match_pattern(const char* name, const char* pattern) {
@@ -198,13 +273,8 @@ static int SDLCALL get_dir_callback(void* userdata, const char* dirname, const c
             entry->AttrFile = sceMcFileAttrReadable | sceMcFileAttrWritable;
         }
         
-        entry->_Create.Sec = 0;
-        entry->_Create.Min = 0;
-        entry->_Create.Hour = 12;
-        entry->_Create.Day = 1;
-        entry->_Create.Month = 1;
-        entry->_Create.Year = 2026;
-        entry->_Modify = entry->_Create;
+        fill_mc_datetime(&entry->_Create, info.create_time);
+        fill_mc_datetime(&entry->_Modify, info.modify_time);
         
         data->count++;
     }
@@ -248,11 +318,6 @@ static void finalize_get_dir(int* result) {
     
     SDL_EnumerateDirectory(path, get_dir_callback, &data);
     
-    if (get_dir_operation.name) {
-        SDL_free(get_dir_operation.name);
-        get_dir_operation.name = NULL;
-    }
-    
     debug_print("sceMcGetDir: path=%s pattern=%s found=%d", path, pattern, data.count);
     
     SDL_free(path);
@@ -269,8 +334,8 @@ int sceMcInit(void) {
     finalizers[sceMcFuncNoClose] = finalize_close;
     finalizers[sceMcFuncNoRead] = finalize_read;
     finalizers[sceMcFuncNoWrite] = finalize_write;
-    finalizers[sceMcFuncNoMkdir] = finalize_path_op;
-    finalizers[sceMcFuncNoDelete] = finalize_path_op;
+    finalizers[sceMcFuncNoMkdir] = finalize_mkdir;
+    finalizers[sceMcFuncNoDelete] = finalize_delete;
     finalizers[sceMcFuncNoGetDir] = finalize_get_dir;
     return sceMcIniSucceed;
 }
@@ -283,6 +348,8 @@ int sceMcSync(int mode, int* cmd, int* result) {
         } else {
             *result = sceMcResSucceed;
         }
+
+        clear_registered_operation_state();
         registered_operation = 0;
         return sceMcExecFinish;
     } else {
@@ -301,12 +368,13 @@ int sceMcGetInfo(int port, int slot, int* type, int* free, int* format) {
 
 int sceMcOpen(int port, int slot, const char* name, int mode) {
     registered_operation = sceMcFuncNoOpen;
-    char* path = get_mc_path(port, name);
+    clear_open_operation();
+    open_operation.port = normalize_mc_port(port);
+    open_operation.path = get_mc_path(open_operation.port, name);
     
     int fd = alloc_fd();
     if (fd == -1) {
         open_operation.fd = sceMcResUpLimitHandle;
-        SDL_free(path);
         return 0;
     }
     
@@ -317,14 +385,12 @@ int sceMcOpen(int port, int slot, const char* name, int mode) {
     
     debug_print("sceMcOpen: file=%s mode=%d mapped=%s", name, mode, sdl_mode);
     
-    SDL_IOStream* file = SDL_IOFromFile(path, sdl_mode);
+    SDL_IOStream* file = SDL_IOFromFile(open_operation.path, sdl_mode);
     if (!file && (mode & 0x0200)) {
         // Fallback for creation
-        file = SDL_IOFromFile(path, "wb");
+        file = SDL_IOFromFile(open_operation.path, "wb");
     }
-    
-    SDL_free(path);
-    
+
     if (file) {
         open_files[fd] = file;
         open_operation.fd = fd;
@@ -363,19 +429,19 @@ int sceMcWrite(int fd, const void* buffer, int size) {
 
 int sceMcMkdir(int port, int slot, const char* name) {
     registered_operation = sceMcFuncNoMkdir;
-    char* path = get_mc_path(port, name);
+    clear_path_operation(&mkdir_operation);
+    mkdir_operation.port = normalize_mc_port(port);
+    mkdir_operation.path = get_mc_path(mkdir_operation.port, name);
     debug_print("sceMcMkdir: %s", name);
-    SDL_CreateDirectory(path);
-    SDL_free(path);
     return 0;
 }
 
 int sceMcDelete(int port, int slot, const char* name) {
     registered_operation = sceMcFuncNoDelete;
-    char* path = get_mc_path(port, name);
+    clear_path_operation(&delete_operation);
+    delete_operation.port = normalize_mc_port(port);
+    delete_operation.path = get_mc_path(delete_operation.port, name);
     debug_print("sceMcDelete: %s", name);
-    SDL_RemovePath(path);
-    SDL_free(path);
     return 0;
 }
 

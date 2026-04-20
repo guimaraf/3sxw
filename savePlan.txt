@@ -92,7 +92,39 @@ Risco:
 
 Status:
 
-- pendente
+- concluida
+
+Resumo da etapa concluida:
+
+- as operacoes assincronas relevantes agora carregam explicitamente o port do slot
+- open passou a armazenar estado proprio da operacao, incluindo port e path resolvido
+- mkdir e delete passaram a ter estado proprio por operacao, incluindo port e path resolvido
+- getdir continuou usando port explicito no estado da operacao
+- getinfo agora tambem usa explicitamente o root do slot correspondente
+- o estado temporario das operacoes e limpo ao final do sceMcSync
+
+Resultado esperado para validacao:
+
+- nenhuma regressao no save e load dos slots 1 e 2
+- nenhuma operacao de mkdir, delete, open ou getdir usando o slot errado
+- menu e boot mantendo o comportamento correto da etapa anterior
+
+Ajuste complementar apos validacao:
+
+- o backend passou a preencher sceMcTblGetDir com create_time e modify_time reais do arquivo
+- isso corrige a escolha do save mais recente no autoload quando slot 1 e slot 2 possuem saves validos
+- a comparacao do jogo continua sendo ate o nivel de segundos
+
+Validacao em teste real:
+
+- save do slot 1 gravado primeiro
+- save do slot 2 gravado depois
+- no boot, o autoload carregou corretamente o save mais recente do slot 2
+
+Conclusao:
+
+- ajuste complementar validado com exito
+- escolha do save mais recente no autoload consolidada
 
 Etapa 3 - Separar leitura, listagem, criacao e remocao por slot
 
