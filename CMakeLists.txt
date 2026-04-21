@@ -189,7 +189,7 @@ endif()
 
 set(PROJECT_LICENSE_FILES
     "${CMAKE_SOURCE_DIR}/LICENSE"
-    "${CMAKE_SOURCE_DIR}/THIRD_PARTY_NOTICES.txt"
+    "${CMAKE_SOURCE_DIR}/docs/THIRD_PARTY_NOTICES.txt"
 )
 
 if(APPLE)
@@ -216,10 +216,11 @@ elseif(WIN32)
         RUNTIME DESTINATION bin
     )
 
-    execute_process(COMMAND cygpath -m /mingw64/bin
-		OUTPUT_VARIABLE binPath
-		OUTPUT_STRIP_TRAILING_WHITESPACE
-	)
+    if(DEFINED MSYS2_LOCATION AND NOT MSYS2_LOCATION STREQUAL "")
+        file(TO_CMAKE_PATH "${MSYS2_LOCATION}/mingw64/bin" binPath)
+    else()
+        get_filename_component(binPath "${CMAKE_C_COMPILER}" DIRECTORY)
+    endif()
 
 	# automatically copies all the dependent DLLS, and ignores the system ones because they aren't necessary
 	install(RUNTIME_DEPENDENCY_SET deps

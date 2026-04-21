@@ -1,79 +1,167 @@
-# Guia de Compilação: macOS
+# Build Guide: macOS
 
-Siga este procedimento para habilitar o processo de extração e link do binário portátil do **3SX (Street Fighter III: 3rd Strike)** via ambiente macOS e o clang empacotado da maçã. O benefício prático aqui é a facilidade das ferramentas C embutidas.
+This guide explains how to build **3SX (Street Fighter III: 3rd Strike)** on macOS.
 
-## 1. Verificando as "Command Line Tools" do Xcode
+## 1. Verify Xcode Command Line Tools
 
-Você provavalmente não precisará emular ecossistemas paralelos ou pacotes externos, desde que o Xcode C/C++ já esteja acoplado por linha de comando em seu Apple.
-
-Faça a verificação básica a fim de ter certeza que tem um construtor presente:
+Check whether the command line tools are installed:
 
 ```bash
 xcode-select -p
 ```
-*Se uma rota de validação de developer application for retornada, significa que suas command tools já são aptas.*
 
-Do contrário, **realize o download automático emulado pela própria via do sistema**:
+If the command does not return a valid path, install them:
 
 ```bash
 xcode-select --install
 ```
 
-Um prompt solicitará a confirmação no sistema. É uma rápida instalação.
+## 2. Prepare `third_party`
 
----
+If the build complains about missing `.a` libraries, headers, or dependencies, check `third_party/` first.
 
-## 2. Atenção Durante Operações Terceirizadas
+Platform-specific build scripts are stored in `scripts/build/`.
 
-Semelhante ao que é referenciado nas arquiteturas irmãs: jamais force uma compilação de cmake com a pasta raiz `third_party/` em falta ou corrompida se você tem limpado arquivos. Se o *terminal Shell* em algum ponto alertar que estão faltando livrarias ou regras isoladas para `.a`, é porque você esvaziou a sua sub-árvore local ou faltam updates nelas. 
-
-Injete o processo automatizado do mantenedor do port para reconstruí-los a partir da raiz do Git:
+For macOS:
 
 ```bash
-sh build-deps.sh
+bash scripts/build/build-deps-macos.sh
 ```
 
----
-
-## 3. Pipeline de Building macOS
-
-Feito o processo preliminar sem nenhuma interrupção, inicie o roteamento do build sem adicionar explicitamente diretivas de clang fora da base - o sistema saberá qual alocação Mac-Native utilizar.
+If you prefer the root shortcut, you can also run:
 
 ```bash
-# Aloca o diretório temporário Release.
+bash build-deps.sh
+```
+
+These scripts prepare FFmpeg, SDL3, GekkoNet, SDL3_net, libcdio, minizip-ng, and tf-psa-crypto in `third_party/`.
+
+## 3. Configure and build
+
+Configure the project:
+
+```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 ```
 
-Desencadeie o paralelismo das tasks para uma renderização muito mais veloz contendo todos os subgrupos da biblioteca `third_party`:
+Build the project:
 
 ```bash
 cmake --build build --parallel
 ```
 
----
+> [!NOTE]
+> If nothing changed since the last successful build, Ninja may report `no work to do.`. That is expected.
 
-## 4. O Passo de Empacotamento Binário Mac
+## 4. Install the final output
 
-No Mac, os binários rodam através não necessariamente de `.exe`, mas sim em torno de pastas modulares do tipo `.app`. As libs compartilhadas dinâmicas `.dylib` precisam ser atreladas aos caminhos corretos dentro dessas estruturas em árvore e contidas a dedo para que o Mac o interprete como um aplicativo sadio.
-
-O comando Install do CMAke é essencial aqui e soluciona a conversão que aturdiria processos falhos de copias estáticas:
+Install the final output:
 
 ```bash
-# Isso envia os links, recursos e executável final para a target designada. 
 cmake --install build --prefix build/application
 ```
 
-O App pronto deve estar contido em `/build/application`.
+> [!NOTE]
+> `cmake --install` does not rebuild the app. It only copies and organizes artifacts already generated in `build/`.
+
+## 5. Add game assets
+
+> [!IMPORTANT]
+> The game will not run correctly without the original assets.
+
+After installation:
+
+1. Go to `build/application/`
+2. Create a folder named `resources`
+3. Place `SF33RD.AFS` inside it
+
+Final path:
+
+```text
+build/application/resources/SF33RD.AFS
+```
 
 ---
 
-## 5. Adicionando a Arte do Jogo: Pasta `resources/`
+# Guia de Compilacao: macOS
 
-> [!CAUTION]
-> A janela ficará preta permenentemente, ou se recusará a subir o render se o arquivo principal de disco extraído do PlayStation 2 que guarda a totalidade da trilha sonora ADX e os bytescenes não estiver localizado como um asset dependente.
+Este guia explica como compilar o **3SX (Street Fighter III: 3rd Strike)** no macOS.
 
-Se certifique inteiramente de:
+## 1. Verifique as Xcode Command Line Tools
 
-1. Abrir os diretórios finais processados pelo passo (Etapa 4) de Instalação.
-2. Criar fisicamente uma pasta chamada de **`resources`** anexa a execução do seu projeto no mesmo grau de hierarquia que processa o *root_path* da aplicação port.
-3. Copiar e colar sem renomear o arquivo original com o nome **`SF33RD.AFS`**. Isso vai instanciar a inicialização da engine.
+Confira se as ferramentas de linha de comando estao instaladas:
+
+```bash
+xcode-select -p
+```
+
+Se o comando nao retornar um caminho valido, instale as ferramentas:
+
+```bash
+xcode-select --install
+```
+
+## 2. Prepare `third_party`
+
+Se o build reclamar de bibliotecas `.a`, headers ou dependencias faltando, verifique `third_party/` primeiro.
+
+Os scripts especificos por plataforma ficam em `scripts/build/`.
+
+Para macOS:
+
+```bash
+bash scripts/build/build-deps-macos.sh
+```
+
+Se preferir usar o atalho da raiz, voce tambem pode rodar:
+
+```bash
+bash build-deps.sh
+```
+
+Esses scripts preparam FFmpeg, SDL3, GekkoNet, SDL3_net, libcdio, minizip-ng e tf-psa-crypto em `third_party/`.
+
+## 3. Configure e compile
+
+Configure o projeto:
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+```
+
+Compile o projeto:
+
+```bash
+cmake --build build --parallel
+```
+
+> [!NOTE]
+> Se nada mudou desde o ultimo build bem-sucedido, o Ninja pode responder `no work to do.`. Isso e esperado.
+
+## 4. Instale a saida final
+
+Instale a saida final:
+
+```bash
+cmake --install build --prefix build/application
+```
+
+> [!NOTE]
+> `cmake --install` nao recompila o app. Ele apenas copia e organiza os artefatos ja gerados em `build/`.
+
+## 5. Adicione os assets do jogo
+
+> [!IMPORTANT]
+> O jogo nao vai funcionar corretamente sem os assets originais.
+
+Depois da instalacao:
+
+1. Va para `build/application/`
+2. Crie uma pasta chamada `resources`
+3. Coloque `SF33RD.AFS` dentro dela
+
+Caminho final:
+
+```text
+build/application/resources/SF33RD.AFS
+```

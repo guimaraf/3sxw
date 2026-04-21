@@ -1,92 +1,233 @@
-# Guia de Compilação: Windows
+# Build Guide: Windows
 
-Neste guia, você encontrará o passo a passo para compilar o **3SX (Street Fighter III: 3rd Strike)** nativamente para o Windows. Toda a construção neste SO depende do ambiente MSYS2.
+This guide explains how to build **3SX (Street Fighter III: 3rd Strike)** on Windows.
 
-## Ambiente Suportado
+## Supported environment
 
-Para garantir o sucesso na compilação, é altamente recomendável utilizar exatamente as seguintes ferramentas:
-
-- **Windows 10 ou Windows 11**.
-- **MSYS2** (obrigatório).
-- Shell executado: **`MSYS2 MinGW 64-bit`** (não utilize UCRT64, nem o prompt do Visual Studio, muito menos o PowerShell padrão do Windows).
-- Compilador **Clang** nativo do MSYS2.
-- Gerador **CMake + Ninja**.
+Recommended setup:
+- Windows 10 or Windows 11
+- MSYS2
+- `MSYS2 MinGW 64-bit` shell
+- Clang from MSYS2
+- CMake + Ninja
 
 > [!WARNING]
-> Usar o shell ou arquitetura (toolchain) incorreta frequentemente resulta em erros de "command not found", quebra de caminhos ou geração corrompida de DLLs e executáveis. Sempre confira se abriu o atalho certo no seu menu Iniciar: **"MSYS2 MinGW 64-bit"**.
+> Use the correct shell. This project is expected to build from **MSYS2 MinGW 64-bit**.
+>
+> The command `CC=clang CXX=clang++ cmake ...` is Unix/MSYS2 shell syntax. It does **not** work in regular PowerShell.
 
----
+## 1. Install required packages
 
-## 1. Instalando as Ferramentas (Packages) Necessárias
-
-Execute o MSYS2 (`MSYS2 MinGW 64-bit`) e instale todos os pacotes nativos para compilar usando a lista `tools/requirements-windows.txt`:
+Inside `MSYS2 MinGW 64-bit`, run:
 
 ```bash
-# Sincroniza e instala as dependências
 pacman -Sy --needed $(cat tools/requirements-windows.txt)
 ```
 
-Esses pacotes englobam o Git, o compilador Clang (`mingw-w64-x86_64-clang`), os construtores de projeto (CMake e Ninja), interpretadores de sintaxe (NASM) e bibliotecas brutas vitais como a Zlib.
+This installs Git, Clang, CMake, Ninja, NASM, Zlib, and other required packages.
 
----
+If the repository is on another drive, move into the project directory manually before building.
 
-## 2. Ponto de Atenção Crítico: A Pasta `third_party`
-
-Um fator comum de quebras da compilação, **como o erro de o compilador não encontrar bibliotecas ou regras para arquivos `.a`**, ocorre se você limpar os dados do repositório inadvertidamente e apagar as bibliotecas terceiras localizadas na aba `third_party/`.
-
-**NUNCA remova a compilação da pasta `third_party` se você não pretende gerá-la novamente.** Diversos sistemas (FFmpeg, GekkoNet, SDL3) rodam embutidos nessa localidade.
-
-Para resolver dependências ausentes, rode a partir da raiz do repositório:
+Example for this repository:
 
 ```bash
-sh build-deps.sh
+cd /f/GitRevised/3sxw
 ```
 
-Esse script extrai e automatiza as rotinas de build para componentes paralelos, jogando-os de volta na pasta `third_party/` em segurança. Este processo pode demorar alguns minutos.
+In MSYS2, a Windows path like `F:\GitRevised\3sxw` becomes `/f/GitRevised/3sxw`.
 
----
+## 2. Prepare `third_party`
 
-## 3. Configuração do Projeto e Compilação
+If the build complains about missing `.a` libraries, headers, or dependencies, check `third_party/` first.
 
-Após atestar que o MSYS2 está carregado e validado e que os pacotes third-party foram populados, configure as regras de arquitetura:
+Platform-specific build scripts are stored in `scripts/build/`.
+
+For Windows:
 
 ```bash
-# Configure o projeto na pasta "build", gerando com Ninja e Clang
+bash scripts/build/build-deps-windows.sh
+```
+
+If you prefer the root shortcut, you can also run:
+
+```bash
+bash build-deps.sh
+```
+
+These scripts prepare FFmpeg, SDL3, GekkoNet, SDL3_net, libcdio, minizip-ng, and tf-psa-crypto in `third_party/`.
+
+## 3. Configure and build
+
+Configure the project:
+
+```bash
 CC=clang CXX=clang++ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 ```
 
-Em seguida, dispare de fato o processo de build para a construção paralela (`-j 4` ou `--parallel` garante mais de 1 núcleo físico acelerando o link das lógicas):
+> [!NOTE]
+> If you change `CMakeLists.txt` or any install rule, run the configure command again before using `cmake --build` or `cmake --install`.
+
+Build the project:
 
 ```bash
 cmake --build build --parallel
 ```
-> [!NOTE] 
-> O resultado no final deverá apontar `[100%] Linking C executable SF3.exe` (ou número similar de arquivos vinculados com êxito).
 
----
+> [!NOTE]
+> If nothing changed since the last successful build, Ninja may report `no work to do.`. That is expected.
 
-## 4. Finalização: Etapa de Instalação (Fundir os Binários)
+> [!WARNING]
+> If CMake configuration fails halfway through, `build/` can become inconsistent. If Ninja later complains about files such as `CMakeFiles/rules.ninja`, clean at least:
+>
+> ```text
+> build/CMakeCache.txt
+> build/CMakeFiles/
+> ```
+>
+> If needed, remove the entire `build/` directory and configure again.
 
-Um erro muito comum no processo final é achar que compilar o projeto em `build` basta para rodá-lo. Na realidade, ferramentas como SDL3 e FFmpeg operam com DLLs acopladas ao sistema. Portanto você DEVE criar as cópias combinadas no pacote de Output através do CMake Install. 
+## 4. Install the final output
 
-Realize a instação (cópias finais):
+Build output alone is not enough. Install assembles the executable, runtime DLLs, and support files into the final folder:
 
 ```bash
 cmake --install build --prefix build/application
 ```
 
-Isso instruirá o CMake a coletar o `SF3.exe`, buscar todas as bibliotecas vinculadas durante a compilação (zlib1.dll, libstdc++-6.dll, SDL3.dll, etc.) e empacotá-las em definitivo para dentro do diretório `build/application/bin/`.
+> [!NOTE]
+> `cmake --install` does not rebuild the project. It only copies and organizes artifacts already produced in `build/`.
+
+## 5. Add game assets
+
+> [!IMPORTANT]
+> The game will not run correctly without the original assets.
+
+After installation:
+
+1. Go to `build/application/`
+2. Create a folder named `resources`
+3. Place `SF33RD.AFS` inside it
+
+Final path:
+
+```text
+build/application/resources/SF33RD.AFS
+```
 
 ---
 
-## 5. REQUISITO FINAL: Criação OBRIGATÓRIA da pasta resources e arquivo AFS
+# Guia de Compilacao: Windows
+
+Este guia explica como compilar o **3SX (Street Fighter III: 3rd Strike)** no Windows.
+
+## Ambiente suportado
+
+Configuracao recomendada:
+- Windows 10 ou Windows 11
+- MSYS2
+- shell `MSYS2 MinGW 64-bit`
+- Clang do MSYS2
+- CMake + Ninja
+
+> [!WARNING]
+> Use o shell correto. Este projeto deve ser compilado a partir do **MSYS2 MinGW 64-bit**.
+>
+> O comando `CC=clang CXX=clang++ cmake ...` e sintaxe de shell Unix/MSYS2. Ele **nao** funciona no PowerShell comum.
+
+## 1. Instale os pacotes necessarios
+
+Dentro do `MSYS2 MinGW 64-bit`, rode:
+
+```bash
+pacman -Sy --needed $(cat tools/requirements-windows.txt)
+```
+
+Isso instala Git, Clang, CMake, Ninja, NASM, Zlib e outros pacotes necessarios.
+
+Se o repositorio estiver em outro disco, entre manualmente na pasta do projeto antes de compilar.
+
+Exemplo para este repositorio:
+
+```bash
+cd /f/GitRevised/3sxw
+```
+
+No MSYS2, um caminho Windows como `F:\GitRevised\3sxw` vira `/f/GitRevised/3sxw`.
+
+## 2. Prepare `third_party`
+
+Se o build reclamar de bibliotecas `.a`, headers ou dependencias faltando, verifique `third_party/` primeiro.
+
+Os scripts especificos por plataforma ficam em `scripts/build/`.
+
+Para Windows:
+
+```bash
+bash scripts/build/build-deps-windows.sh
+```
+
+Se preferir usar o atalho da raiz, voce tambem pode rodar:
+
+```bash
+bash build-deps.sh
+```
+
+Esses scripts preparam FFmpeg, SDL3, GekkoNet, SDL3_net, libcdio, minizip-ng e tf-psa-crypto em `third_party/`.
+
+## 3. Configure e compile
+
+Configure o projeto:
+
+```bash
+CC=clang CXX=clang++ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+```
+
+> [!NOTE]
+> Se voce alterar `CMakeLists.txt` ou qualquer regra de install, rode novamente o comando de configuracao antes de usar `cmake --build` ou `cmake --install`.
+
+Compile o projeto:
+
+```bash
+cmake --build build --parallel
+```
+
+> [!NOTE]
+> Se nada mudou desde o ultimo build bem-sucedido, o Ninja pode responder `no work to do.`. Isso e esperado.
+
+> [!WARNING]
+> Se a configuracao do CMake falhar no meio do processo, `build/` pode ficar inconsistente. Se depois o Ninja reclamar de arquivos como `CMakeFiles/rules.ninja`, limpe pelo menos:
+>
+> ```text
+> build/CMakeCache.txt
+> build/CMakeFiles/
+> ```
+>
+> Se necessario, apague todo o diretorio `build/` e configure de novo.
+
+## 4. Instale a saida final
+
+O resultado do build sozinho nao basta. A instalacao monta o executavel, as DLLs de runtime e os arquivos de suporte na pasta final:
+
+```bash
+cmake --install build --prefix build/application
+```
+
+> [!NOTE]
+> `cmake --install` nao recompila o projeto. Ele apenas copia e organiza os artefatos ja gerados em `build/`.
+
+## 5. Adicione os assets do jogo
 
 > [!IMPORTANT]
-> Mesmo após uma compilação perfeita do `.exe` e DLLs, **o jogo não abrirá ou gerará erro silencioso se ele não encontrar os seus ativos de base, extraídos da versão orginal!**
+> O jogo nao vai funcionar corretamente sem os assets originais.
 
-Para isso:
-1. Navegue para a pasta compilada onde se encontra o binário (exemplo: `build/application/bin/`).
-2. Crie uma pasta raiz com o nome exato: **`resources`**.
-3. Obtenha o arquivo maciço contido puramente na versão de console e copie-o para o final da rotina: `resources/SF33RD.AFS`.
+Depois da instalacao:
 
-Dessa maneira, o binário que criamos terá todos os recursos visuais de áudio (ADX) e arte carregados pela engrenagem original em tempo de execução e o jogo rodará tranquilamente no PC.
+1. Va para `build/application/`
+2. Crie uma pasta chamada `resources`
+3. Coloque `SF33RD.AFS` dentro dela
+
+Caminho final:
+
+```text
+build/application/resources/SF33RD.AFS
+```

@@ -31,10 +31,10 @@ jobs:
             uses: actions/cache@v4
             with:
                 path: third_party
-                key: ${{ runner.os }}-deps-${{ hashFiles('build-deps.sh') }}
+                key: ${{ runner.os }}-deps-${{ hashFiles('build-deps.sh', 'scripts/build/build-deps-common.sh', 'scripts/build/build-deps-windows.sh') }}
 
           - name: Build dependencies
-            run: sh build-deps.sh
+            run: bash ./scripts/build/build-deps-windows.sh
 
           - name: Build for Windows
             run: |

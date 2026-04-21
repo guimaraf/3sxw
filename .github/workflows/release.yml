@@ -19,7 +19,7 @@ jobs:
           submodules: true
 
       - name: Install dependencies
-        run: sh build-deps.sh
+        run: bash ./scripts/build/build-deps-macos.sh
 
       - name: Build
         run: |
@@ -82,7 +82,7 @@ jobs:
         run: tr -d '\r' < tools/requirements-windows.txt | xargs pacman -S --needed --noconfirm
 
       - name: Build dependencies
-        run: sh build-deps.sh
+        run: bash ./scripts/build/build-deps-windows.sh
 
       - name: Build
         run: |

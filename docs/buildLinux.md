@@ -1,72 +1,157 @@
-# Guia de Compilação: Linux
+# Build Guide: Linux
 
-Este documento traz as instruções para compilar o **3SX (Street Fighter III: 3rd Strike)** nativamente em distribuições baseadas em Linux (Debian/Ubuntu). A grande vantagem deste sistema é sua estabilidade e acesso fácil aos pacotes pelo APT Unix.
+This guide explains how to build **3SX (Street Fighter III: 3rd Strike)** on Linux distributions based on Debian or Ubuntu.
 
-## 1. Instalação de Pacotes Essenciais
+## 1. Install required packages
 
-Antes de qualquer compilação do jogo principal ou de bibliotecas pesadas de base, utilize os empacotadores da sua distribuição para obter todas as ferramentas principais:
+Before building, install the base toolchain and libraries:
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y $(cat tools/requirements-ubuntu.txt)
 ```
 
-Isso proverá o Clang e todas as bibliotecas elementares para manuseio.
+## 2. Prepare `third_party`
 
----
+If the build complains about missing `.a` libraries, headers, or dependencies, check `third_party/` first.
 
-## 2. Ponto de Atenção: Bibliotecas em `third_party/`
+Platform-specific build scripts are stored in `scripts/build/`.
 
-Se o compilador acusar falta de DLLs, arquivos de biblioteca `.a` ou `missing header files` durante a construção final (Make / Ninja build pipeline), é bastante comum que haja arquivos deletados ou dependências não-compiladas contidas nativamente no diretório `third_party/` localizado na raiz deste repositório.
-
-**Você precisa ter certeza que elas existem.** Sempre construa essas extensões utilizando o comando fornecido:
+For Linux:
 
 ```bash
-# Você deve estar na raiz do repositório
-sh build-deps.sh
+bash scripts/build/build-deps-linux.sh
 ```
 
-Esse comando preparará SDL3, FFmpeg, dependências GekkoNet e drivers CDIO, injetando-os automaticamente na estrutura do pacote final isolando dependências de sistema com problema.
-
----
-
-## 3. Configuração e Compilação Principal
-
-Em seguida, basta orientar a compilação utilizando o Clang já previamente adquirido durante o carregamento das ferramentas nas configurações Release:
+If you prefer the root shortcut, you can also run:
 
 ```bash
-# Especifica clang e gera caminhos do build
+bash build-deps.sh
+```
+
+These scripts prepare FFmpeg, SDL3, GekkoNet, SDL3_net, libcdio, minizip-ng, and tf-psa-crypto in `third_party/`.
+
+## 3. Configure and build
+
+Configure the project:
+
+```bash
 CC=clang CXX=clang++ cmake -B build -DCMAKE_BUILD_TYPE=Release
 ```
 
-Execute o processamento com o paralelismo habilitado para acelerar o tempo de link entre objetos C:
+Build the project:
 
 ```bash
 cmake --build build --parallel
 ```
 
----
+> [!NOTE]
+> If nothing changed since the last successful build, Ninja may report `no work to do.`. That is expected.
 
-## 4. Etapa de Instalação (Reagrupamento)
+## 4. Install the final output
 
-Se você compilar o binário, o jogo não vai subir propriamente do arquivo `.so` contido dentro de `/build`. Para atrelar as bibliotecas geradas via `chmod` (runtime libraries e shared objects), dispare o construtor final em formato de install:
+Install the final output:
 
 ```bash
 cmake --install build --prefix build/application
 ```
 
-Isso irá despachar o binário pronto para a pasta de aplicação contendo seu `.so` e diretivas.
+> [!NOTE]
+> `cmake --install` does not rebuild the project. It only reuses artifacts already generated in `build/`.
+
+## 5. Add game assets
+
+> [!IMPORTANT]
+> The game will not run correctly without the original assets.
+
+After installation:
+
+1. Go to `build/application/`
+2. Create a folder named `resources`
+3. Place `SF33RD.AFS` inside it
+
+Final path:
+
+```text
+build/application/resources/SF33RD.AFS
+```
 
 ---
 
-## 5. Regra Vital: Importação de Ativos (Assets do Jogo)
+# Guia de Compilacao: Linux
 
-> [!WARNING]
-> Independentemente da perfeição da sua configuração ou se a tela abriu antes, **sem os assets visuais originais você terá uma tela vazia em terminal ou fechamento fatal (crash) silenciado!**
+Este guia explica como compilar o **3SX (Street Fighter III: 3rd Strike)** em distribuicoes Linux baseadas em Debian ou Ubuntu.
 
-Para sanar este problema e dar vida ao seu compilado final de Unix:
-1. Vá até o local de processamento base (`build/application/`).
-2. Crie manualmente a pasta de injeção de leitura: **`resources`**.
-3. Adicione lá internamente o maior cofre de áudios (ADX) e visuais da engine, diretamente do disco referencial original: **`SF33RD.AFS`**.
+## 1. Instale os pacotes necessarios
 
-Ficando assim o caminho: `build/application/resources/SF33RD.AFS`. Quando disparar seu script de gameplay do binário no Ubuntu, ele reconhecerá as rotas em sua totalidade de primeira.
+Antes de compilar, instale o toolchain e as bibliotecas base:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y $(cat tools/requirements-ubuntu.txt)
+```
+
+## 2. Prepare `third_party`
+
+Se o build reclamar de bibliotecas `.a`, headers ou dependencias faltando, verifique `third_party/` primeiro.
+
+Os scripts especificos por plataforma ficam em `scripts/build/`.
+
+Para Linux:
+
+```bash
+bash scripts/build/build-deps-linux.sh
+```
+
+Se preferir usar o atalho da raiz, voce tambem pode rodar:
+
+```bash
+bash build-deps.sh
+```
+
+Esses scripts preparam FFmpeg, SDL3, GekkoNet, SDL3_net, libcdio, minizip-ng e tf-psa-crypto em `third_party/`.
+
+## 3. Configure e compile
+
+Configure o projeto:
+
+```bash
+CC=clang CXX=clang++ cmake -B build -DCMAKE_BUILD_TYPE=Release
+```
+
+Compile o projeto:
+
+```bash
+cmake --build build --parallel
+```
+
+> [!NOTE]
+> Se nada mudou desde o ultimo build bem-sucedido, o Ninja pode responder `no work to do.`. Isso e esperado.
+
+## 4. Instale a saida final
+
+Instale a saida final:
+
+```bash
+cmake --install build --prefix build/application
+```
+
+> [!NOTE]
+> `cmake --install` nao recompila o projeto. Ele apenas reutiliza os artefatos ja gerados em `build/`.
+
+## 5. Adicione os assets do jogo
+
+> [!IMPORTANT]
+> O jogo nao vai funcionar corretamente sem os assets originais.
+
+Depois da instalacao:
+
+1. Va para `build/application/`
+2. Crie uma pasta chamada `resources`
+3. Coloque `SF33RD.AFS` dentro dela
+
+Caminho final:
+
+```text
+build/application/resources/SF33RD.AFS
+```

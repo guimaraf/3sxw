@@ -18,13 +18,13 @@ jobs:
             uses: actions/cache@v4
             with:
                 path: third_party
-                key: ${{ runner.os }}-deps-${{ hashFiles('build-deps.sh') }}
+                key: ${{ runner.os }}-deps-${{ hashFiles('build-deps.sh', 'scripts/build/build-deps-common.sh', 'scripts/build/build-deps-linux.sh') }}
 
           - name: Install dependencies
             run: |
                 sudo apt update
                 sudo apt install -y $(cat tools/requirements-ubuntu.txt)
-                ./build-deps.sh
+                bash ./scripts/build/build-deps-linux.sh
             shell: bash
 
           - name: Build for Linux
