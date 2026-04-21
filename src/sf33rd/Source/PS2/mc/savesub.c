@@ -21,12 +21,17 @@
 
 #include <inttypes.h>
 #include <math.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 s16 icon_fnum[3] = { 83, 84, 85 };
 s16 data_fnum[3] = { 87, -1, 88 };
 s16 font_fnum[3] = { 80, 81, 82 };
+
+#define REPLAY_MAIN_FILE_SIZE 0x7458
+#define REPLAY_SUB_FILE_SIZE 0x10
 
 s8* pl_name[20] = {
     "GIL", "ALX", "RYU", "YUN", "DUD", "NCR", "HUG", "IBK", "ELE", "ORO",
@@ -69,6 +74,9 @@ static void load_data_set(_save_work* save);
 static void icon_tex_chg(u8* src, u16* dst, u32 size);
 static void encode_data(u16* src, s32 size);
 static void decode_data(_save_work* save, u16* src, s32 size);
+static void replay_fill_sub_info(_sub_info* sub, struct _REP_GAME_INFOR* rp);
+static size_t replay_payload_size(void);
+static _sub_info* replay_sub_info_from_buffer(_save_work* save);
 static void save_slot_trans(_save_work* save);
 static void save_file_trans(_save_work* save);
 static void save_msg_trans(_save_work* save);
@@ -79,6 +87,66 @@ static s32 cancel_ck();
 static s32 save_data_decode(_save_work* save, s32 mode);
 static s32 info_data_check(_save_work* save);
 static s32 yes_no_check(_save_work* save);
+
+static void replay_fill_current_date(memcard_date* md) {
+    time_t now;
+    struct tm* local_now;
+
+    memset(md, 0, sizeof(*md));
+
+    now = time(NULL);
+    local_now = localtime(&now);
+
+    if (local_now != NULL) {
+        md->dayofweek = (u8)local_now->tm_wday;
+        md->sec = (u8)local_now->tm_sec;
+        md->min = (u8)local_now->tm_min;
+        md->hour = (u8)local_now->tm_hour;
+        md->day = (u8)local_now->tm_mday;
+        md->month = (u8)(local_now->tm_mon + 1);
+        md->year = (u16)(local_now->tm_year + 1900);
+        return;
+    }
+
+    md->dayofweek = 4;
+    md->hour = 12;
+    md->day = 1;
+    md->month = 1;
+    md->year = 2026;
+}
+
+static s32 replay_normalize_player(s32 player) {
+    if ((player < 0) || (player >= 20)) {
+        return 0;
+    }
+
+    return player;
+}
+
+static void replay_fill_sub_info(_sub_info* sub, struct _REP_GAME_INFOR* rp) {
+    s32 i;
+
+    memset(sub, 0, sizeof(*sub));
+    replay_fill_current_date(&sub->date);
+
+    for (i = 0; i < 2; i++) {
+        sub->player[i] = replay_normalize_player(rp->player_infor[i].my_char);
+    }
+}
+
+static size_t replay_payload_size(void) {
+    size_t offset = offsetof(_replay_data, replay_w);
+
+    if (offset >= REPLAY_MAIN_FILE_SIZE) {
+        return 0;
+    }
+
+    return REPLAY_MAIN_FILE_SIZE - offset;
+}
+
+static _sub_info* replay_sub_info_from_buffer(_save_work* save) {
+    return (_sub_info*)(save->buf_adrs + REPLAY_MAIN_FILE_SIZE);
+}
 
 static void load_data(s32 fnum, void* adrs) {
     s32 nsct;
@@ -1913,14 +1981,19 @@ static void save_data_store_replay(_save_work* save) {
     u32* head;
     u32 pltype[2];
     _replay_data* data = (_replay_data*)save->buf_adrs;
-    _sub_info* sub = (_sub_info*)&data[1];
+    _sub_info* sub = replay_sub_info_from_buffer(save);
     _REPLAY_W* rw = &Replay_w;
     struct _MINI_SAVE_W* msw = &rw->mini_save_w;
     struct _SAVE_W* sw = &save_w[Present_Mode];
     struct _REP_GAME_INFOR* rp = &Rep_Game_Infor[10];
+    size_t replay_size = replay_payload_size();
+
+    memset(save->buf_adrs, 0, REPLAY_MAIN_FILE_SIZE + REPLAY_SUB_FILE_SIZE);
+    replay_fill_sub_info(sub, rp);
+    data->date = sub->date;
 
     for (i = 0; i < 2; i++) {
-        pltype[i] = sub->player[i] = rp->player_infor[i].my_char;
+        pltype[i] = (u32)sub->player[i];
     }
 
     memcpy(&rw->game_infor, rp, sizeof(*rp));
@@ -1932,8 +2005,12 @@ static void save_data_store_replay(_save_work* save) {
     memcpy(&msw->extra_option, &sw->extra_option, sizeof(msw->extra_option));
 
     memcpy(&rw->system_dir, &system_dir[Present_Mode], sizeof(rw->system_dir));
-    memcpy(&data->replay_w, rw, sizeof(data->replay_w));
-    encode_data((u16*)data, sizeof(*data));
+    if (replay_size > sizeof(data->replay_w)) {
+        replay_size = sizeof(data->replay_w);
+    }
+
+    memcpy(&data->replay_w, rw, replay_size);
+    encode_data((u16*)data, REPLAY_MAIN_FILE_SIZE);
 
     if ((dst = McActIconTexAdrs(2, 0)) == NULL) {
         return;
@@ -2003,7 +2080,7 @@ static s32 save_data_decode_sysdir(_save_work* save, s32 mode) {
 static s32 save_data_decode_replay(_save_work* save, s32 mode) {
     _replay_data* data = (_replay_data*)save->buf_adrs;
 
-    decode_data(save, (u16*)data, sizeof(*data));
+    decode_data(save, (u16*)data, REPLAY_MAIN_FILE_SIZE);
 
     if ((save->mc_ver_err != 0) || (save->mc_sum_err != 0)) {
         return -1;
@@ -2102,8 +2179,14 @@ static void load_data_set_sysdir(_save_work* save) {
 
 static void load_data_set_replay(_save_work* save) {
     _replay_data* data = (_replay_data*)save->buf_adrs;
+    size_t replay_size = replay_payload_size();
 
-    memcpy(&Replay_w, &data->replay_w, sizeof(Replay_w));
+    if (replay_size > sizeof(Replay_w)) {
+        replay_size = sizeof(Replay_w);
+    }
+
+    memset(&Replay_w, 0, sizeof(Replay_w));
+    memcpy(&Replay_w, &data->replay_w, replay_size);
 }
 
 static s32 info_data_check(_save_work* save) {

@@ -1,0 +1,445 @@
+Plano de Implementacao - Sistema de Replay
+
+Objetivo geral
+
+Corrigir o fluxo de save, listagem e load de replay para que ele funcione no port para PC com comportamento o mais proximo possivel do jogo original, sem regressao no sistema de save ja consolidado e sem quebrar a separacao entre slot 1 e slot 2.
+
+Problema atual consolidado
+
+- o replay e salvo em disco
+- os diretorios do replay sao criados corretamente
+- os slots 1 e slot 2 ja estao funcionando
+- porem o menu mostra:
+  - [File 00] BROKEN FILE
+- por isso o replay nao pode ser validado de ponta a ponta como funcional
+
+Hipotese tecnica atual
+
+- o problema esta concentrado no fluxo de metadados auxiliares do replay
+- o arquivo auxiliar sub.bin e hoje o principal suspeito
+- existe chance de:
+  - dados nao inicializados no momento do save
+  - player[2] invalido no bloco auxiliar
+  - timestamp ou date vindo em formato inesperado no caminho de leitura
+  - diferenca entre o layout que o jogo espera e o que esta sendo retornado pelo backend
+- a listagem do replay depende da consistencia desses metadados; se eles falham, o jogo marca o arquivo como quebrado
+
+Arquivos mais provaveis para alteracao ao longo das fases
+
+- src/sf33rd/Source/PS2/mc/savesub.c
+- src/sf33rd/Source/PS2/mc/mcsub.c
+- include/sf33rd/Source/PS2/mc/savesub.h
+- src/port/sdk/sdk_libmc.c
+
+Estrategia de trabalho
+
+- nao implementar tudo de uma vez
+- fechar uma fase por vez
+- ao final de cada fase, compilar localmente e testar
+- com base no resultado dos testes, decidir se:
+  - a fase sera encerrada
+  - a fase precisara de ajuste complementar
+  - ou a proxima fase podera comecar
+- ao fim de cada fase validada, fazer backup no git e GitHub
+
+--------------------------------------------------
+Fase 1 - Sanear a gravacao do bloco auxiliar do replay
+--------------------------------------------------
+
+Objetivo da fase
+
+Garantir que o bloco auxiliar gravado junto com o replay seja montado de forma totalmente deterministica, sem lixo de memoria e sem campos parcialmente preenchidos.
+
+Arquivos previstos para alteracao nesta fase
+
+- src/sf33rd/Source/PS2/mc/savesub.c
+- opcionalmente include/sf33rd/Source/PS2/mc/savesub.h, apenas se for necessario ajustar declaracoes ou tipos auxiliares
+
+Implementacao prevista
+
+- revisar a funcao save_data_store_replay
+- garantir que o buffer usado para o replay seja inicializado de forma segura antes do encode e antes da gravacao do bloco auxiliar
+- preencher explicitamente todos os campos relevantes de _sub_info
+- garantir que player[0] e player[1] sejam gravados com valores validos e coerentes
+- garantir que a date associada ao bloco auxiliar seja montada de forma valida e previsivel, sem depender de memoria residual
+- revisar se o bloco principal _replay_data tambem precisa de inicializacao explicita antes do encode
+
+Motivo desta fase
+
+- hoje a suspeita mais forte e que o replay esteja sendo salvo com metadados auxiliares incompletos ou nao inicializados
+- esta e a alteracao com melhor custo-beneficio inicial e menor risco estrutural
+
+Risco
+
+- baixo a medio
+- o risco principal e alterar o save do replay e introduzir regressao no arquivo salvo
+
+Testes recomendados ao final da fase
+
+1. Ambiente limpo
+
+- apagar os replays existentes do slot escolhido
+- iniciar o jogo
+- salvar um replay novo no slot 1
+- voltar ao menu de load de replay
+
+Resultado esperado
+
+- o replay aparece na lista
+- o menu nao deve mais mostrar BROKEN FILE para o replay salvo nesta fase
+- a linha do replay deve exibir data valida
+- a linha do replay deve exibir os personagens corretamente, se o fluxo ja estiver consistente
+
+2. Segundo replay no mesmo slot
+
+- salvar um segundo replay no mesmo slot
+- verificar a listagem dos dois arquivos
+
+Resultado esperado
+
+- os dois arquivos aparecem separadamente
+- nenhum dos dois aparece como BROKEN FILE
+
+3. Replay em slot diferente
+
+- salvar um replay no slot 2
+- conferir a listagem do slot 1 e do slot 2
+
+Resultado esperado
+
+- cada slot mostra apenas seus proprios replays
+- a correcao da fase nao deve causar mistura entre slots
+
+Criterio para encerrar a fase
+
+- a listagem deixa de marcar como BROKEN FILE os replays novos salvos apos a implementacao
+- nao ha regressao visivel no save do replay
+- a separacao entre slots continua intacta
+
+Se a fase falhar
+
+- verificar se os players continuam vindo invalidos na leitura
+- verificar se a date da listagem esta sendo sobrescrita por um timestamp invalido do backend
+- avancar para a fase 2
+
+--------------------------------------------------
+Fase 2 - Ajustar a leitura e validacao da listagem de replay
+--------------------------------------------------
+
+Objetivo da fase
+
+Garantir que o caminho de leitura usado pelo menu de replay interprete corretamente o sub.bin e monte save->info[] exatamente no formato esperado pela UI e pela validacao.
+
+Arquivos previstos para alteracao nesta fase
+
+- src/sf33rd/Source/PS2/mc/mcsub.c
+- src/sf33rd/Source/PS2/mc/savesub.c
+
+Implementacao prevista
+
+- revisar o fluxo de McActExistSet e mc_act_exist para replay
+- confirmar exatamente quais bytes sao lidos de sub.bin e em que ordem sao copiados para o buffer de destino
+- validar se a substituicao da date pelo _Modify do arquivo esta correta e segura
+- revisar se player[0] e player[1] permanecem intactos apos a leitura
+- revisar info_data_check para confirmar se a regra de validacao esta coerente com o formato real dos dados de replay
+- se necessario, ajustar a leitura para que arquivo inexistente, arquivo invalido e arquivo quebrado nao sejam confundidos
+
+Motivo desta fase
+
+- mesmo com o save correto, o menu ainda pode interpretar os dados de forma errada
+- a UI de replay depende diretamente da montagem correta de save->info[]
+
+Risco
+
+- medio
+- erro nesta fase pode fazer o jogo listar replays validos como vazios, ou tratar arquivos ausentes como corrompidos
+
+Testes recomendados ao final da fase
+
+1. Validacao da listagem de replay recem-salvo
+
+- salvar um replay novo
+- abrir imediatamente a lista de replay
+
+Resultado esperado
+
+- o replay aparece com data valida
+- o replay aparece com os dois personagens corretos
+- nao aparece BROKEN FILE
+
+2. Validacao apos reiniciar o jogo
+
+- fechar o jogo
+- abrir novamente
+- voltar ao menu de replay
+
+Resultado esperado
+
+- o replay continua listado corretamente apos novo boot
+- o problema nao deve ser apenas mascarado em memoria durante a mesma sessao
+
+3. Validacao com mais de um replay
+
+- salvar pelo menos dois replays no mesmo slot
+- conferir a ordem e a listagem
+
+Resultado esperado
+
+- ambos aparecem validos
+- a listagem nao corrompe um replay ao ler o outro
+
+Criterio para encerrar a fase
+
+- a leitura da lista fica estavel tanto na mesma sessao quanto apos reiniciar o jogo
+- nenhum replay novo salvo aparece como BROKEN FILE por erro de parse da listagem
+
+Se a fase falhar
+
+- verificar se o timestamp retornado pelo backend esta chegando em formato invalido
+- avancar para a fase 3
+
+--------------------------------------------------
+Fase 3 - Ajustar timestamps e metadados retornados pelo backend
+--------------------------------------------------
+
+Objetivo da fase
+
+Garantir que o backend do Memory Card emulado retorne datas e horarios validos e coerentes para os arquivos de replay, especialmente para o sub.bin usado na listagem.
+
+Arquivos previstos para alteracao nesta fase
+
+- src/port/sdk/sdk_libmc.c
+- opcionalmente src/sf33rd/Source/PS2/mc/mcsub.c, se for necessario ajustar a forma de consumo desses dados
+
+Implementacao prevista
+
+- revisar a montagem de create_time e modify_time em sceMcGetDir para os arquivos e diretorios do replay
+- confirmar se a conversao para o formato esperado pelo jogo esta correta em:
+  - ano
+  - mes
+  - dia
+  - hora
+  - minuto
+  - segundo
+  - dayofweek
+- confirmar se o arquivo usado na listagem de replay recebe timestamp real e consistente
+- garantir que a correcao nao quebre a regra ja consolidada de escolha do save mais recente no autoload
+
+Motivo desta fase
+
+- no fluxo atual, a date exibida no menu pode vir do _Modify retornado pelo backend
+- se esse timestamp estiver invalido, o replay continuara sendo tratado como quebrado mesmo que o sub.bin esteja correto
+
+Risco
+
+- medio
+- esta fase toca o backend compartilhado do Memory Card e pode afetar save principal, replay e ordenacao por data
+
+Testes recomendados ao final da fase
+
+1. Replay novo com data exibida corretamente
+
+- salvar um replay novo
+- verificar a data mostrada no menu
+
+Resultado esperado
+
+- data completa valida
+- sem BROKEN FILE
+
+2. Dois replays em momentos diferentes
+
+- salvar um replay
+- esperar algum intervalo
+- salvar outro replay
+- abrir a lista
+
+Resultado esperado
+
+- ambos aparecem com data coerente
+- o horario do segundo replay deve ser mais recente
+
+3. Revalidacao do save principal
+
+- manter save valido nos slots 1 e 2 com datas diferentes
+- reiniciar o jogo
+
+Resultado esperado
+
+- o autoload continua escolhendo corretamente o save mais recente
+- a fase nao deve regredir o sistema de save que ja foi consolidado
+
+Criterio para encerrar a fase
+
+- o backend passa a retornar datas validas para a listagem do replay
+- nao ha regressao no autoload do save principal
+
+Se a fase falhar
+
+- o problema provavelmente ainda estara no conteudo principal do replay, nao apenas no metadado auxiliar
+- avancar para a fase 4
+
+--------------------------------------------------
+Fase 4 - Ajustar decode e load do replay principal
+--------------------------------------------------
+
+Objetivo da fase
+
+Garantir que, apos aparecer corretamente na lista, o replay tambem possa ser carregado e decodificado sem erro de versao, checksum ou layout.
+
+Arquivos previstos para alteracao nesta fase
+
+- src/sf33rd/Source/PS2/mc/savesub.c
+- include/sf33rd/Source/PS2/mc/savesub.h, se for necessario revisar layout de structs
+
+Implementacao prevista
+
+- revisar save_data_decode_replay
+- revisar load_data_set_replay
+- confirmar se o tamanho, layout e preenchimento de _replay_data e _REPLAY_W estao corretos
+- revisar se ha campos nao inicializados no replay principal antes do encode
+- confirmar se mc_ver_err ou mc_sum_err estao sendo disparados por dados montados incorretamente
+- se necessario, adicionar diagnostico temporario para isolar a falha e remover depois da confirmacao
+
+Motivo desta fase
+
+- e possivel que a listagem fique correta, mas o replay ainda falhe ao carregar
+- nesse caso, o problema passa do metadado auxiliar para o conteudo principal do replay
+
+Risco
+
+- medio a alto
+- esta e a fase mais sensivel do fluxo de replay
+
+Testes recomendados ao final da fase
+
+1. Carregar replay recem-salvo
+
+- salvar um replay novo
+- listar o replay
+- carregar esse replay
+
+Resultado esperado
+
+- o replay aparece corretamente no menu
+- o replay entra em load sem erro visivel
+- a reproducao inicia normalmente
+
+2. Reiniciar e carregar novamente
+
+- fechar o jogo
+- abrir novamente
+- carregar o mesmo replay salvo anteriormente
+
+Resultado esperado
+
+- o replay continua legivel apos novo boot
+- nao depende de estado de memoria da sessao anterior
+
+3. Teste cruzado entre slots
+
+- salvar um replay no slot 1
+- salvar outro replay no slot 2
+- carregar cada um no seu respectivo slot
+
+Resultado esperado
+
+- ambos funcionam
+- um slot nao interfere no outro
+
+Criterio para encerrar a fase
+
+- replay lista corretamente
+- replay carrega corretamente
+- replay reproduz normalmente
+
+Se a fase falhar
+
+- revisar novamente o layout do bloco principal do replay
+- comparar com replay valido conhecido, se houver
+
+--------------------------------------------------
+Fase 5 - Limpeza final e validacao de regressao
+--------------------------------------------------
+
+Objetivo da fase
+
+Concluir a correcao do replay com codigo limpo, sem diagnosticos temporarios desnecessarios, e revalidar que nao houve regressao no restante do sistema de Memory Card.
+
+Arquivos previstos para alteracao nesta fase
+
+- os arquivos tocados nas fases anteriores, apenas se houver limpeza a fazer
+
+Implementacao prevista
+
+- remover logs temporarios, validacoes redundantes ou codigo de diagnostico usado nas fases anteriores
+- revisar consistencia final do fluxo
+- garantir que a implementacao final permaneceu simples e estavel
+
+Risco
+
+- baixo
+
+Testes recomendados ao final da fase
+
+1. Regressao do save principal
+
+- testar save/load normal
+- testar autoload no boot
+- testar escolha do save mais recente entre slot 1 e slot 2
+
+Resultado esperado
+
+- tudo continua funcionando como antes
+
+2. Regressao do replay
+
+- salvar replay
+- listar replay
+- carregar replay
+
+Resultado esperado
+
+- todo o fluxo de replay continua funcional
+
+3. Regressao de isolamento entre slots
+
+- salvar e carregar conteudos diferentes em cada slot
+
+Resultado esperado
+
+- nenhum vazamento entre slot 1 e slot 2
+
+Criterio de encerramento do trabalho
+
+O trabalho pode ser considerado concluido quando:
+
+- replay novo salvo deixa de aparecer como BROKEN FILE
+- replay aparece com data e jogadores coerentes
+- replay pode ser carregado normalmente
+- slots continuam separados
+- save principal nao sofre regressao
+
+Observacoes operacionais
+
+- a compilacao sera feita localmente pelo usuario
+- os testes serao feitos e reportados pelo usuario ao final de cada fase
+- ao fim de cada fase validada, sera feito backup no git e GitHub
+- este arquivo deve ser atualizado conforme cada fase avancar, da mesma forma que foi feito em savePlan.txt
+
+Ordem recomendada de execucao
+
+1. Fase 1
+2. Fase 2
+3. Fase 3, apenas se a data do backend continuar suspeita
+4. Fase 4, se a listagem ficar correta mas o load ainda falhar
+5. Fase 5 para consolidacao final
+
+Observacao final
+
+A ordem acima foi escolhida para atacar primeiro o ponto de menor impacto e maior probabilidade de acerto:
+
+- primeiro, garantir que o replay esta sendo salvo com metadados auxiliares consistentes
+- depois, garantir que o menu le esses dados corretamente
+- em seguida, revisar o backend apenas se a data continuar inconsistente
+- por fim, atacar o bloco principal do replay caso a falha avance da listagem para o load

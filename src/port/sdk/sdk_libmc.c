@@ -208,6 +208,23 @@ typedef struct {
     const char* pattern;
 } EnumerateDirData;
 
+static void fill_mc_datetime(sceMcStDateTime* dst, SDL_Time time_value);
+
+static void fill_dir_entry(sceMcTblGetDir* entry, const char* entry_name, const SDL_PathInfo* info) {
+    SDL_memset(entry, 0, sizeof(*entry));
+    SDL_strlcpy((char*)entry->EntryName, entry_name, sizeof(entry->EntryName));
+    entry->FileSizeByte = info->size;
+
+    if (info->type == SDL_PATHTYPE_DIRECTORY) {
+        entry->AttrFile = sceMcFileAttrSubdir;
+    } else {
+        entry->AttrFile = sceMcFileAttrReadable | sceMcFileAttrWritable;
+    }
+
+    fill_mc_datetime(&entry->_Create, info->create_time);
+    fill_mc_datetime(&entry->_Modify, info->modify_time);
+}
+
 static void fill_mc_datetime(sceMcStDateTime* dst, SDL_Time time_value) {
     SDL_DateTime dt;
 
@@ -257,25 +274,24 @@ static int SDLCALL get_dir_callback(void* userdata, const char* dirname, const c
     }
     
     char* full_path = NULL;
-    SDL_asprintf(&full_path, "%s%s", dirname, fname);
+
+    if (dirname && dirname[0] != '\0') {
+        const char* separator = "";
+        size_t dirname_len = SDL_strlen(dirname);
+
+        if (dirname[dirname_len - 1] != '/' && dirname[dirname_len - 1] != '\\') {
+            separator = "/";
+        }
+
+        SDL_asprintf(&full_path, "%s%s%s", dirname, separator, fname);
+    } else {
+        SDL_asprintf(&full_path, "%s", fname);
+    }
     
     SDL_PathInfo info;
     if (SDL_GetPathInfo(full_path, &info)) {
         sceMcTblGetDir* entry = &data->table[data->count];
-        SDL_memset(entry, 0, sizeof(sceMcTblGetDir));
-        
-        SDL_strlcpy((char*)entry->EntryName, fname, sizeof(entry->EntryName));
-        entry->FileSizeByte = info.size;
-        
-        if (info.type == SDL_PATHTYPE_DIRECTORY) {
-            entry->AttrFile = sceMcFileAttrSubdir;
-        } else {
-            entry->AttrFile = sceMcFileAttrReadable | sceMcFileAttrWritable;
-        }
-        
-        fill_mc_datetime(&entry->_Create, info.create_time);
-        fill_mc_datetime(&entry->_Modify, info.modify_time);
-        
+        fill_dir_entry(entry, fname, &info);
         data->count++;
     }
     
@@ -294,6 +310,30 @@ static void finalize_get_dir(int* result) {
     
     const char* pattern = full_req ? full_req : "";
     const char* last_slash = SDL_strrchr(pattern, '/');
+    const bool has_wildcard = pattern && SDL_strchr(pattern, '*') != NULL;
+
+    if (!has_wildcard && pattern[0] != '\0' && get_dir_operation.maxent > 0) {
+        char* exact_path = get_mc_path(get_dir_operation.port, full_req);
+        SDL_PathInfo info;
+
+        if (exact_path && SDL_GetPathInfo(exact_path, &info)) {
+            const char* entry_name = pattern;
+            const char* basename = SDL_strrchr(pattern, '/');
+
+            if (basename != NULL) {
+                entry_name = basename + 1;
+            }
+
+            fill_dir_entry(&get_dir_operation.table[0], entry_name, &info);
+            debug_print("sceMcGetDir: exact=%s found=1", exact_path);
+            SDL_free(exact_path);
+            SDL_free(path);
+            *result = 1;
+            return;
+        }
+
+        SDL_free(exact_path);
+    }
     
     if (last_slash) {
         int dir_len = (int)(last_slash - pattern);

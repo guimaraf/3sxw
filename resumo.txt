@@ -1,0 +1,382 @@
+Resumo detalhado do projeto 3SXW
+
+Identidade do projeto
+
+- 3SXW e um port para PC do Street Fighter III: 3rd Strike da versao de PlayStation 2.
+- O projeto e um hard fork do 3SX.
+- A base tecnica vem da decompilacao da versao de PS2.
+- O projeto e comunitario, gratuito e sem finalidade comercial.
+- O foco atual do fork e Windows.
+
+Objetivos e caracteristicas gerais do fork
+
+- corrigir e estabilizar recursos do port original
+- manter o comportamento o mais proximo possivel da versao de console
+- deixar o jogo portatil, gravando dados na propria pasta do executavel
+- facilitar build e distribuicao para uso da comunidade
+
+Organizacao de arquivos gerados pelo jogo
+
+- data/saves/
+- data/config/
+- data/keymap/
+
+No fork atual, os arquivos do jogo nao ficam em AppData ou em diretorios espalhados no sistema operacional. Tudo fica ao lado do executavel, dentro de data/.
+
+Build e ambiente
+
+- Windows usa MSYS2 + MinGW64 + Clang + CMake + Ninja
+- o usuario faz a compilacao localmente
+- a documentacao de build foi melhorada durante este trabalho
+
+Arquivos de apoio criados durante o trabalho
+
+- savePlan.txt
+- replayProblem.txt
+- resumo.txt
+
+Estado atual consolidado
+
+- save principal do jogo funcional
+- autoload do Memory Card no boot funcionando
+- separacao real entre slot 1 e slot 2 funcionando
+- escolha do save mais recente entre os dois slots funcionando
+- replay ainda com problema especifico de leitura/listagem
+
+--------------------------------------------------
+Fluxo analisado do projeto
+--------------------------------------------------
+
+1. Fluxo de boot do jogo
+
+O fluxo de inicializacao relevante para o Memory Card passa por init3rd.c.
+
+Resumo do fluxo:
+
+- Init_Task
+- Init_Task_1st
+- Init_Task_Aload
+- Init_Task_2nd
+- Init_Task_End
+
+Ponto critico identificado:
+
+- o boot possui uma etapa especifica para autoload do Memory Card antes do restante do jogo
+- essa etapa fica em Init_Task_Aload
+- quando ativa, ela chama SaveInit(0, 2), que e o fluxo de autoload do save de sistema
+
+Problema que existia:
+
+- o projeto compilava com MEMCARD_DISABLED
+- com isso, Init_Task_Aload era substituido por Init_Task_Wait
+- na pratica, o jogo pulava a leitura do Memory Card no boot
+
+Correcao aplicada:
+
+- a flag MEMCARD_DISABLED foi removida da compilacao
+- com isso, o boot voltou a executar o fluxo de autoload antes do logo da Capcom
+
+Conclusao do boot:
+
+- a leitura do Memory Card no inicio do jogo nao estava ausente do codigo
+- ela estava apenas desativada por configuracao de compilacao
+
+2. Subsistema de save
+
+O subsistema principal de save esta em:
+
+- src/sf33rd/Source/PS2/mc/savesub.c
+- include/sf33rd/Source/PS2/mc/savesub.h
+
+Pontos importantes:
+
+- SaveInit inicializa o fluxo de save/load
+- SaveMove executa a maquina de estados principal do save
+- o sistema ja suportava:
+  - selecao de slot
+  - leitura
+  - escrita
+  - autoload
+  - autosave
+  - replay
+  - direction data
+
+Fluxo interno importante da maquina de estados em savesub.c:
+
+- save_move_init
+- save_move_sels
+- save_move_self
+- save_move_aload
+- save_move_asave
+- save_move_exit
+
+Interpretacao pratica:
+
+- save_move_init prepara buffers, fontes e recursos
+- save_move_sels trata selecao de slot
+- save_move_self trata selecao de arquivo
+- save_move_aload trata o autoload automatico do boot
+- save_move_asave trata autosave
+- save_move_exit finaliza e limpa o estado
+
+Modo de autoload identificado:
+
+- SaveInit(0, 2) entra no fluxo de autoload do save de sistema
+
+Mensagens do Memory Card ja existentes no projeto
+
+As mensagens de UI do Memory Card estavam presentes e completas em msgtble.c, incluindo:
+
+- acesso ao memory card
+- autoload do save de sistema
+- autosave
+- mensagens de erro
+- referencias a slot 1 e slot 2
+
+Isso confirmou desde o inicio que o recurso fazia parte do projeto e nao precisava ser refeito do zero.
+
+3. Camada de Memory Card do jogo
+
+A camada de operacoes do Memory Card fica em:
+
+- src/sf33rd/Source/PS2/mc/mcsub.c
+- include/sf33rd/Source/PS2/mc/mcsub.h
+
+Pontos importantes dessa camada:
+
+- ela trabalha com o conceito de port/slot
+- max_port = 2
+- a logica do jogo ja sabia iterar entre dois memory cards
+- o autoload ja testava slot 1 e slot 2
+- quando os dois slots tinham save valido, o jogo ja tentava escolher o mais recente
+
+Conclusao:
+
+- a logica de dois slots ja existia no lado do jogo
+- o problema estava no backend do port para PC
+
+4. Backend do Memory Card no port para PC
+
+O backend emulado do libmc fica em:
+
+- src/port/sdk/sdk_libmc.c
+
+Estado original encontrado no inicio da analise:
+
+- as funcoes recebiam port e slot
+- mas ignoravam isso na pratica
+- todo acesso de memory card era mapeado para um unico root:
+  - data/saves/
+
+Efeito pratico:
+
+- slot 1 e slot 2 existiam apenas na UI e na logica do jogo
+- fisicamente, ambos gravavam e liam o mesmo diretorio
+
+Correcao aplicada para os slots:
+
+- port 0 -> data/saves/slot1/
+- port 1 -> data/saves/slot2/
+
+Novo layout real dos Memory Cards:
+
+- data/saves/slot1/
+- data/saves/slot2/
+
+Dentro de cada slot, o jogo continua criando os diretorios normais do PS2, por exemplo:
+
+- BASLUS-20949SF3SYS
+- BASLUS-20949SF3R00
+- BASLUS-20949SF3R01
+
+5. Etapas implementadas para os slots
+
+Etapa 1 - separacao fisica dos slots
+
+- o root do card passou a ser resolvido por port
+- open, mkdir, delete e getdir passaram a usar o root do slot correto
+
+Validacao pratica:
+
+- save de sistema no slot 1 e slot 2 separados
+- autoload do slot 1 funcionando
+- load manual do slot 2 funcionando
+
+Etapa 2 - estado assincrono por slot
+
+- as operacoes relevantes passaram a carregar explicitamente o port
+- open, mkdir, delete, getdir e getinfo passaram a guardar estado por operacao
+- o estado temporario das operacoes passou a ser limpo ao final do sceMcSync
+
+Objetivo dessa etapa:
+
+- evitar qualquer vazamento de slot entre operacoes assincronas
+
+6. Problema do timestamp e escolha do save mais recente
+
+Durante os testes dos dois slots, foi observado que:
+
+- quando os dois slots tinham save valido
+- o jogo tendia a priorizar o slot 1
+
+Analise feita:
+
+- a logica do jogo realmente tenta escolher o save mais recente
+- porem o backend estava preenchendo datas fixas nos resultados de listagem
+- com datas iguais, o jogo acabava escolhendo o slot 1
+
+Correcao aplicada:
+
+- o backend passou a preencher create_time e modify_time reais dos arquivos
+- esses timestamps passaram a ser convertidos para o formato esperado pelo jogo
+
+Resultado:
+
+- o autoload passou a escolher corretamente o save mais recente
+
+Validacao pratica feita:
+
+- save no slot 1 gravado primeiro
+- save no slot 2 gravado depois
+- no boot, o autoload carregou corretamente o slot 2
+
+7. Estado atual dos Memory Cards no backend
+
+No modelo atual do port:
+
+- ambos os slots sao tratados como memory cards PS2 validos
+- ambos sao tratados como presentes
+- ambos sao tratados como formatados
+- ambos reportam espaco livre valido
+
+Importante:
+
+- isso foi considerado suficiente para o objetivo atual
+- nao foi implementada simulacao de:
+  - card ausente
+  - card desformatado
+  - diferencas dinamicas de hardware entre slots
+
+--------------------------------------------------
+Analise do problema de replay
+--------------------------------------------------
+
+Estado atual do replay
+
+- o replay pode ser salvo
+- os arquivos sao criados em disco
+- os slots tambem funcionam para replay
+- porem o jogo mostra:
+
+[File 00] BROKEN FILE
+
+Arquivos de replay observados no disco
+
+Exemplo de diretorio:
+
+- BASLUS-20949SF3R00
+- BASLUS-20949SF3R01
+
+Conteudo observado dentro do replay:
+
+- arquivo principal do replay sem extensao
+- icon.sys
+- icon20.ico
+- sub.bin
+
+Isso indica:
+
+- o problema nao parece mais ser de path
+- o problema nao parece ser de slot
+- o problema nao parece ser ausencia de arquivo
+
+Hipotese tecnica mais forte levantada
+
+O ponto mais suspeito no fluxo de replay e:
+
+- save_data_store_replay preenche dados do replay
+- mas o bloco auxiliar _sub_info usado na listagem pode nao estar com o campo date devidamente inicializado
+
+Estruturas importantes:
+
+- _replay_data
+- _sub_info
+
+O motivo dessa suspeita:
+
+- a listagem dos arquivos de replay usa os metadados auxiliares
+- a validacao exige campos de data coerentes
+- se a data estiver invalida ou nao inicializada, o jogo marca o arquivo como quebrado
+
+Suspeita principal registrada:
+
+- o sub.bin do replay pode estar sendo salvo com metadados incompletos ou invalidos
+- por isso a UI mostra BROKEN FILE
+
+Arquivo-base para a investigacao futura:
+
+- replayProblem.txt
+
+--------------------------------------------------
+Arquivos importantes do projeto para retomar depois
+--------------------------------------------------
+
+Fluxo de boot e inicio:
+
+- src/sf33rd/Source/Game/init3rd.c
+
+Subsistema de save:
+
+- src/sf33rd/Source/PS2/mc/savesub.c
+- include/sf33rd/Source/PS2/mc/savesub.h
+
+Camada de operacoes do Memory Card:
+
+- src/sf33rd/Source/PS2/mc/mcsub.c
+- include/sf33rd/Source/PS2/mc/mcsub.h
+
+Mensagens do Memory Card:
+
+- src/sf33rd/Source/PS2/mc/msgtble.c
+
+Backend do port no PC:
+
+- src/port/sdk/sdk_libmc.c
+
+Documentacao:
+
+- docs/building.md
+
+Arquivos de apoio do trabalho:
+
+- savePlan.txt
+- replayProblem.txt
+- resumo.txt
+
+--------------------------------------------------
+Modo de trabalho do usuario
+--------------------------------------------------
+
+- o usuario faz compilacao local
+- o usuario valida cada fase manualmente
+- depois reporta os resultados
+- o projeto esta com backup no git e no GitHub
+- o trabalho por etapas tem se mostrado eficiente neste projeto
+
+--------------------------------------------------
+Situacao atual para o proximo chat
+--------------------------------------------------
+
+O que esta consolidado:
+
+- save de sistema
+- autoload no boot
+- separacao real entre slot 1 e slot 2
+- escolha do save mais recente
+- documentacao de build melhorada
+
+O que ficou em aberto:
+
+- replay salva em disco, mas o jogo ainda trata como BROKEN FILE
+
+Se o proximo chat for sobre replay, nao e necessario refazer a analise de fluxo do boot, do save principal nem dos slots. Essa parte ja esta consolidada.

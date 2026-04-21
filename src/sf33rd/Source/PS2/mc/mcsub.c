@@ -367,6 +367,8 @@ static s32 mc_create_file(memcard_work* mw) {
             goto block_7;
         }
 
+        mw->fd = mw->rslt;
+
         if (sceMcClose(mw->fd) < 0) {
             goto block_7;
         }
@@ -805,9 +807,11 @@ static void mc_act_exist(memcard_work* mw) {
     case 2:
         switch (mc_read_file(mw)) {
         case 0:
+            md = (memcard_date*)&mc_dir._Modify;
+            day_of_week(md);
             mw->r_no_0 = 0;
             mw->result = 0;
-            memcpy(mw->bufs, &mc_dir._Modify, 8);
+            memcpy(mw->bufs, md, sizeof(*md));
             break;
 
         case 1:
