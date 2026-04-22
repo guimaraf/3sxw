@@ -212,7 +212,6 @@ if(APPLE)
     )
 elseif(WIN32)
     install(TARGETS SF3
-		RUNTIME_DEPENDENCY_SET deps
         RUNTIME DESTINATION bin
     )
 
@@ -222,13 +221,31 @@ elseif(WIN32)
         get_filename_component(binPath "${CMAKE_C_COMPILER}" DIRECTORY)
     endif()
 
-	# automatically copies all the dependent DLLS, and ignores the system ones because they aren't necessary
-	install(RUNTIME_DEPENDENCY_SET deps
-		DIRECTORIES ${binPath} "${FFMPEG_ROOT}/bin" "${SDL3_ROOT}/bin"
-		PRE_EXCLUDE_REGEXES "^api"
-		POST_EXCLUDE_REGEXES ".*system32/.*\\.dll"
-		DESTINATION bin
-	)
+    file(GLOB FFMPEG_DLLS "${FFMPEG_ROOT}/bin/*.dll")
+    file(GLOB SDL3_DLLS "${SDL3_ROOT}/bin/*.dll")
+
+    # Explicit copies are more reliable than runtime dependency discovery on MSYS2 CI.
+    set(WINDOWS_RUNTIME_DLLS
+        "${binPath}/libgcc_s_seh-1.dll"
+        "${binPath}/libiconv-2.dll"
+        "${binPath}/libstdc++-6.dll"
+        "${binPath}/libwinpthread-1.dll"
+        "${binPath}/zlib1.dll"
+    )
+
+    set(WINDOWS_PACKAGE_DLLS ${FFMPEG_DLLS} ${SDL3_DLLS})
+    foreach(runtime_dll IN LISTS WINDOWS_RUNTIME_DLLS)
+        if(EXISTS "${runtime_dll}")
+            list(APPEND WINDOWS_PACKAGE_DLLS "${runtime_dll}")
+        endif()
+    endforeach()
+
+    if(WINDOWS_PACKAGE_DLLS)
+        install(FILES
+            ${WINDOWS_PACKAGE_DLLS}
+            DESTINATION bin
+        )
+    endif()
 
     install(FILES
         "$<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${CMAKE_CURRENT_BINARY_DIR}/SF3.pdb>"
