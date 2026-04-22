@@ -25,6 +25,13 @@ This fork does **not** currently prioritize:
 - Read the relevant build guide in [docs/buildWindows.md](docs/buildWindows.md), [docs/buildLinux.md](docs/buildLinux.md), or [docs/buildMac.md](docs/buildMac.md).
 - Understand the intent of the fork before proposing cleanups or behavior changes.
 
+## Legal and repository safety
+
+- Do not add original game assets, audio, artwork, logos, BIOS, firmware, dumps, extracted files, or other proprietary materials to the repository.
+- Do not open pull requests that include copyrighted game content or official branding assets.
+- The project must continue to require each user to provide their own legally obtained original copy of the game.
+- Keep public documentation aligned with the legal notice in [README.md](README.md).
+
 ## Contribution expectations
 
 When contributing, prefer:
@@ -85,6 +92,13 @@ Este fork **nao** prioriza atualmente:
 - Leia o [README.md](README.md).
 - Leia o guia de build relevante em [docs/buildWindows.md](docs/buildWindows.md), [docs/buildLinux.md](docs/buildLinux.md) ou [docs/buildMac.md](docs/buildMac.md).
 - Entenda a intencao do fork antes de propor limpezas ou mudancas de comportamento.
+
+## Seguranca juridica e do repositorio
+
+- Nao adicione ao repositorio assets originais do jogo, audios, artes, logos, BIOS, firmware, dumps, arquivos extraidos ou outros materiais proprietarios.
+- Nao abra pull requests contendo conteudo protegido do jogo ou assets oficiais de branding.
+- O projeto deve continuar exigindo que cada usuario forneca sua propria copia original obtida legalmente.
+- Mantenha a documentacao publica alinhada com o aviso legal em [README.md](README.md).
 
 ## Expectativas de contribuicao
 

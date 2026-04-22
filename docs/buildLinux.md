@@ -63,6 +63,8 @@ cmake --install build --prefix build/application
 
 > [!IMPORTANT]
 > The game will not run correctly without the original assets.
+> You must use your own legally obtained original copy of the game.
+> This repository is not affiliated with or endorsed by Capcom and does not include proprietary game assets.
 
 After installation:
 
@@ -143,6 +145,8 @@ cmake --install build --prefix build/application
 
 > [!IMPORTANT]
 > O jogo nao vai funcionar corretamente sem os assets originais.
+> Voce deve usar sua propria copia original obtida legalmente.
+> Este repositorio nao possui afiliacao nem endosso da Capcom e nao inclui assets proprietarios do jogo.
 
 Depois da instalacao:
 

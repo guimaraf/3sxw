@@ -8,6 +8,15 @@ Requires an official copy of *Street Fighter III: 3rd Strike* or *Street Fighter
 
 Based on a [decompilation](https://github.com/crowded-street/sfiii-decomp) of the PlayStation 2 port.
 
+## Legal notice
+
+- This repository is an independent fan-made reverse engineering and portability project.
+- It is not affiliated with, endorsed by, sponsored by, or approved by Capcom.
+- Capcom, Street Fighter, Street Fighter III: 3rd Strike, and all related names, logos, characters, audio, artwork, and game assets are the property of their respective rights holders.
+- This repository does not include the original game assets, audio, artwork, BIOS, firmware, or other proprietary data required to play the game.
+- To use this project, you must provide your own legally obtained original copy of the game.
+- If you do not own an original copy, do not use this project.
+
 ---
 
 ## Changes in this fork
@@ -76,6 +85,15 @@ Um port do maior jogo de luta de todos os tempos para plataformas modernas - for
 Requer uma copia oficial de *Street Fighter III: 3rd Strike* ou *Street Fighter Anniversary Collection* para PlayStation 2 para jogar.
 
 Baseado em uma [decompilacao](https://github.com/crowded-street/sfiii-decomp) do port para PlayStation 2.
+
+## Aviso legal
+
+- Este repositorio e um projeto independente de fans, voltado a engenharia reversa e portabilidade.
+- Ele nao possui afiliacao, endosso, patrocinio ou aprovacao da Capcom.
+- Capcom, Street Fighter, Street Fighter III: 3rd Strike e todos os nomes, logos, personagens, audios, artes e assets relacionados pertencem aos seus respectivos detentores de direitos.
+- Este repositorio nao inclui os assets originais do jogo, audios, artes, BIOS, firmware ou outros dados proprietarios necessarios para jogar.
+- Para usar este projeto, voce deve fornecer sua propria copia original obtida legalmente.
+- Se voce nao possui uma copia original, nao utilize este projeto.
 
 ---
 
