@@ -43,7 +43,8 @@ target_compile_definitions(SF3 PRIVATE
     $<$<CONFIG:Release>:RELEASE>
     $<$<CONFIG:Release>:CHECKSUM>
 
-    _POSIX_C_SOURCE
+    $<$<PLATFORM_ID:Darwin>:_DARWIN_C_SOURCE>
+    $<$<NOT:$<PLATFORM_ID:Darwin>>:_POSIX_C_SOURCE=200809L>
 
     # GekkoNet is a pre-built static lib; these were previously propagated by its cmake target
     GEKKONET_STATIC

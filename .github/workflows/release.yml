@@ -8,6 +8,56 @@ permissions:
   contents: write
 
 jobs:
+  build_linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y $(cat tools/requirements-ubuntu.txt)
+          bash ./scripts/build/build-deps-linux.sh
+        shell: bash
+
+      - name: Build
+        run: |
+          set -o pipefail
+          CC=clang CXX=clang++ cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2>&1 | tee build.log
+        shell: bash
+
+      - name: Install
+        run: cmake --install build --prefix dist
+        shell: bash
+
+      - name: Package TGZ
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA::7}"
+          ARCHIVE_NAME="3SX-${SHORT_SHA}-linux.tar.gz"
+          tar -C dist -czf "${ARCHIVE_NAME}" .
+        shell: bash
+
+      - name: Upload Linux release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-linux
+          path: |
+            3SX-*-linux.tar.gz
+
+      - name: Upload Linux build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-linux
+          path: build.log
+
   build_macos:
     name: Build macOS
     runs-on: macos-latest
@@ -123,6 +173,7 @@ jobs:
     name: Create GitHub release
     runs-on: ubuntu-latest
     needs:
+      - build_linux
       - build_macos
       - build_windows
 
