@@ -20,10 +20,9 @@ static const char* data_path = NULL;
 
 const char* Paths_GetDataPath() {
     if (data_path == NULL) {
-        char* base = SDL_GetBasePath();
+        const char* base = SDL_GetBasePath();
         char* full_path = NULL;
         SDL_asprintf(&full_path, "%sdata/", base);
-        SDL_free(base);
         SDL_CreateDirectory(full_path);
         data_path = full_path;
     }

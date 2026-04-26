@@ -1,0 +1,486 @@
+Plano do modo debug por parametro
+=================================
+
+Objetivo
+--------
+
+Criar um modo de diagnostico ativado por parametro no executavel, sem precisar
+manter duas versoes diferentes do jogo.
+
+Uso desejado:
+
+SF3.exe --debug-mode
+
+Comportamento esperado:
+- Sem --debug-mode: nenhuma coleta, nenhum arquivo de log, nenhuma gravacao por frame.
+- Com --debug-mode: coletar metricas objetivas de desempenho, input, renderizacao, audio e I/O.
+- Os logs devem ficar em data/debug/ por padrao.
+- O formato deve ser simples de revisar e comparar depois de uma jogatina real.
+
+Observacao:
+- Preferir --debug-mode com dois hifens, porque o parser atual usa opcoes longas nesse formato.
+- Se for realmente necessario aceitar -debug-mode, isso pode ser adicionado depois como compatibilidade.
+
+
+Etapa 1 - Adicionar parametro --debug-mode sem coletar dados ainda
+------------------------------------------------------------------
+
+Objetivo:
+- Criar o interruptor de runtime.
+- Garantir que o jogo continua igual quando o parametro nao e usado.
+
+Tarefas:
+- Adicionar campo de configuracao para debug runtime.
+- Registrar argumento --debug-mode no parser.
+- Garantir que a opcao esteja disponivel tambem em Release, nao apenas em builds com DEBUG.
+- Nao criar arquivos de log nesta etapa.
+
+Arquivos previstos:
+- src/configuration.h
+- src/args.c
+- src/main.c, somente se for necessario consultar o modo no fluxo principal
+
+Resultado esperado no jogo:
+- Executar SF3.exe normalmente: comportamento identico ao atual.
+- Executar SF3.exe --debug-mode: jogo abre normalmente.
+- Nenhum arquivo de log ainda e criado.
+
+Testes sugeridos:
+- Fazer build local.
+- Rodar sem parametro e jogar alguns minutos.
+- Rodar com --debug-mode e jogar alguns minutos.
+- Confirmar que menus, gameplay, audio, input e fechamento do jogo continuam iguais.
+- Confirmar que parametros atuais de netplay continuam funcionando.
+
+
+Etapa 2 - Criar modulo central de log, ainda sem metricas pesadas
+-----------------------------------------------------------------
+
+Objetivo:
+- Ter uma API unica para escrever logs apenas quando --debug-mode estiver ativo.
+- Evitar espalhar fopen/fprintf pelo projeto.
+
+Tarefas:
+- Criar modulo de debug runtime.
+- Abrir data/debug/session-YYYYMMDD-HHMMSS/ ou data/debug/latest/ ao iniciar.
+- Criar arquivo session.txt com informacoes basicas.
+- Fechar arquivos corretamente ao sair.
+- Se --debug-mode estiver desligado, todas as funcoes devem retornar imediatamente.
+
+Arquivos previstos:
+- include/port/debug/debug_log.h
+- src/port/debug/debug_log.c
+- src/main.c
+- CMakeLists.txt, somente se o novo .c nao for incluido automaticamente pelo GLOB_RECURSE
+
+Resultado esperado no jogo:
+- Sem --debug-mode: data/debug/ nao deve ser criado.
+- Com --debug-mode: criar pasta de sessao em data/debug/.
+- Criar session.txt com dados basicos, por exemplo:
+  - versao/commit se disponivel
+  - data/hora
+  - argumentos usados
+  - scale-mode atual
+  - resolucao da janela
+
+Testes sugeridos:
+- Rodar sem --debug-mode e confirmar que nenhum data/debug novo aparece.
+- Rodar com --debug-mode e fechar no menu inicial.
+- Confirmar existencia de data/debug/.../session.txt.
+- Confirmar que o arquivo tem conteudo legivel.
+- Confirmar que o jogo fecha sem deixar arquivo travado.
+
+
+Etapa 3 - Registrar frame timing resumido
+-----------------------------------------
+
+Objetivo:
+- Medir se ha jitter, spikes ou frame pacing irregular.
+- Esta e a primeira etapa realmente util para responsividade.
+
+Tarefas:
+- Medir tempos por frame:
+  - poll events
+  - begin frame
+  - game_step_0
+  - end frame
+  - game_step_1
+  - sleep
+  - total frame
+- Registrar em CSV apenas quando --debug-mode estiver ativo.
+- Criar resumo final com media, pior frame, p95 e p99.
+
+Arquivos previstos:
+- src/main.c
+- src/port/sdl/sdl_app.c
+- include/port/debug/debug_log.h
+- src/port/debug/debug_log.c
+
+Arquivos de log esperados:
+- frame_timing.csv
+- summary.txt
+
+Formato esperado de frame_timing.csv:
+frame,total_ms,poll_ms,begin_ms,game0_ms,end_ms,game1_ms,sleep_ms,late_flag
+
+Resultado esperado:
+- Em scale-mode=nearest, a maioria dos frames deve ficar perto de 16.78 ms.
+- Picos ocasionais podem acontecer em carregamentos/transicoes.
+- Durante gameplay estavel, p99 idealmente deve ficar proximo do alvo, sem muitos frames acima de 18-20 ms.
+
+Testes sugeridos:
+- Rodar com --debug-mode e scale-mode=nearest.
+- Testar:
+  - menu inicial por 1 minuto
+  - character select
+  - Training ou Versus por 10 minutos
+  - Arcade com transicoes de round
+- Reportar:
+  - worst_frame_ms
+  - p95_frame_ms
+  - p99_frame_ms
+  - quantidade de late frames
+  - trechos em que sentiu travada, se houver
+
+
+Etapa 4 - Medir renderizacao e cache de texturas
+------------------------------------------------
+
+Objetivo:
+- Ver se gargalos de renderizacao aparecem em gameplay real.
+- Confirmar se criacao de textura durante gameplay causa spikes.
+
+Tarefas:
+- Medir render_task_count por frame.
+- Medir tempo gasto em qsort/render_tasks.
+- Medir quantidade de chamadas SDL_RenderGeometry por frame.
+- Contar cache miss em SDL_CreateTextureFromSurface.
+- Registrar picos em event_log.csv.
+
+Arquivos previstos:
+- src/port/sdl/sdl_game_renderer.c
+- include/port/debug/debug_log.h
+- src/port/debug/debug_log.c
+
+Arquivos de log esperados:
+- render_stats.csv
+- event_log.csv
+- summary.txt atualizado
+
+Formato esperado de render_stats.csv:
+frame,render_tasks,geometry_calls,texture_cache_misses,render_sort_ms,render_geometry_ms
+
+Eventos esperados em event_log.csv:
+frame,event,value
+1234,texture_cache_miss,1
+1234,render_task_peak,842
+1234,render_spike_ms,4.20
+
+Resultado esperado:
+- render_tasks deve variar por cena, mas nao chegar perto do limite atual sem aviso.
+- texture_cache_misses devem aparecer principalmente em transicoes, primeiro uso de personagens/efeitos e carregamentos.
+- Durante round estabilizado, texture_cache_misses idealmente deve cair para 0.
+
+Testes sugeridos:
+- Rodar com --debug-mode.
+- Entrar em Training/Versus.
+- Usar personagens diferentes e golpes com muitos efeitos.
+- Testar supers, parries, hit sparks, K.O., transicao de round e continue.
+- Reportar:
+  - max_render_tasks
+  - total_texture_cache_misses
+  - se algum spike visual coincide com texture_cache_miss
+
+
+Etapa 5 - Medir audio e carregamento de BGM/ADX
+-----------------------------------------------
+
+Objetivo:
+- Descobrir se o audio causa spikes no frame ou atraso perceptivel.
+- Separar SFX de BGM/ADX.
+
+Tarefas:
+- Medir tempo de ADX_ProcessTracks.
+- Medir tempo de ADX_EntryAfs, ADX_StartMem e load_file.
+- Medir chamadas a AFS_ReadSync usadas por audio.
+- Registrar tamanho de fila de audio ADX, se barato de coletar.
+- Medir eventos de inicio/troca de BGM.
+
+Arquivos previstos:
+- src/port/sound/adx.c
+- src/port/io/afs.c
+- src/port/sdl/sdl_app.c
+- include/port/debug/debug_log.h
+- src/port/debug/debug_log.c
+
+Arquivos de log esperados:
+- audio_stats.csv
+- event_log.csv
+- summary.txt atualizado
+
+Formato esperado de audio_stats.csv:
+frame,adx_process_ms,adx_queued_bytes,adx_tracks,afs_sync_read_ms,audio_event
+
+Eventos esperados:
+frame,event,value
+2500,adx_start_file,46
+2500,afs_sync_read_ms,22.40
+2501,adx_process_spike_ms,5.80
+
+Resultado esperado:
+- ADX_ProcessTracks deve ser baixo na maior parte dos frames.
+- Spikes podem acontecer ao iniciar BGM ou trocar musica.
+- Se AFS_ReadSync for alto em gameplay, e candidato real para otimizar.
+
+Testes sugeridos:
+- Rodar Arcade e Versus.
+- Observar entrada de BGM no inicio da luta.
+- Observar troca de round e telas de transicao.
+- Reportar:
+  - worst_adx_process_ms
+  - worst_afs_sync_read_ms
+  - se houve travada ao iniciar musica
+  - se audio estalou, atrasou ou cortou
+
+
+Etapa 6 - Registrar input por frame de forma compacta
+-----------------------------------------------------
+
+Objetivo:
+- Validar se input esta sendo capturado no frame esperado.
+- Evitar logs gigantes e impossiveis de analisar.
+
+Tarefas:
+- Registrar somente mudancas de input, nao todos os frames brutos.
+- Registrar frame, jogador, estado atual, novo input, input anterior.
+- Opcionalmente registrar somente durante round ativo.
+- Adicionar contador de frames entre press e release para botoes importantes.
+
+Arquivos previstos:
+- src/main.c
+- src/port/sdl/sdl_pad.c, se for necessario input bruto antes da conversao
+- src/sf33rd/Source/Game/io/ioconv.c, se for necessario input convertido
+- include/port/debug/debug_log.h
+- src/port/debug/debug_log.c
+
+Arquivos de log esperados:
+- input_events.csv
+- summary.txt atualizado
+
+Formato esperado de input_events.csv:
+frame,player,raw_state,converted_state,changed_bits,source
+
+Resultado esperado:
+- Em jogo local, input pressionado deve aparecer no frame de leitura seguinte.
+- Nao deve haver perda de press curto quando o botao fica pressionado por pelo menos 1 frame.
+- Press muito curto abaixo de 1 frame depende do polling do sistema e nao e garantido.
+
+Testes sugeridos:
+- Rodar Training.
+- Fazer sequencias simples:
+  - toque rapido em LP, MP, HP, LK, MK, HK
+  - segurar e soltar direcional
+  - dash
+  - hadouken
+  - parry tap
+- Reportar:
+  - se algum comando sentido no controle nao apareceu no log
+  - se input apareceu duplicado
+  - se input apareceu atrasado em relacao a sensacao de gameplay
+
+
+Etapa 7 - Registrar netplay separadamente
+-----------------------------------------
+
+Objetivo:
+- Separar problemas locais de problemas de rede.
+- Medir rollback, delay, frames behind e catch-up.
+
+Tarefas:
+- Registrar delay configurado.
+- Registrar ping medio.
+- Registrar rollback maximo por janela.
+- Registrar quando catch_up acontece.
+- Registrar quantidade de frames simulados sem render por rollback/catch-up.
+
+Arquivos previstos:
+- src/netplay/netplay.c
+- include/port/debug/debug_log.h
+- src/port/debug/debug_log.c
+
+Arquivos de log esperados:
+- netplay_stats.csv
+- event_log.csv
+- summary.txt atualizado
+
+Formato esperado de netplay_stats.csv:
+frame,ping,delay,rollback,frames_behind,catch_up,rolled_back_frames
+
+Resultado esperado:
+- Em local ou rede boa, rollback deve ficar baixo.
+- Catch-up frequente indica problema de rede, pacing ou processamento.
+- Delay local atual e DELAY_FRAMES=1; qualquer alteracao deve ser testada com cuidado.
+
+Testes sugeridos:
+- Testar partida local via 127.0.0.1 se aplicavel.
+- Testar partida real em rede.
+- Reportar:
+  - ping medio
+  - rollback maximo
+  - frequencia de catch_up
+  - sensacao de atraso ou teleport
+
+
+Etapa 8 - Gerar resumo automatico para report
+---------------------------------------------
+
+Objetivo:
+- Facilitar sua vida ao reportar resultados.
+- Evitar enviar arquivos enormes.
+
+Tarefas:
+- Ao encerrar, gerar summary.txt com os principais numeros.
+- Incluir caminho dos CSVs.
+- Incluir top 20 piores frames com motivo provavel:
+  - render spike
+  - ADX spike
+  - AFS sync read
+  - texture cache miss
+  - present/sleep jitter
+
+Arquivos previstos:
+- include/port/debug/debug_log.h
+- src/port/debug/debug_log.c
+
+Arquivo esperado:
+- summary.txt
+
+Formato esperado:
+session_seconds=600
+frames=35760
+avg_frame_ms=16.78
+p95_frame_ms=17.10
+p99_frame_ms=18.40
+worst_frame_ms=31.20
+late_frames=14
+max_render_tasks=900
+texture_cache_misses=42
+worst_adx_process_ms=6.20
+worst_afs_sync_read_ms=24.50
+input_events=1830
+
+Resultado esperado:
+- Voce consegue reportar apenas o summary.txt e, se necessario, os trechos dos CSVs ao redor dos piores frames.
+
+Testes sugeridos:
+- Jogar 10 minutos com --debug-mode.
+- Fechar o jogo normalmente.
+- Confirmar summary.txt completo.
+- Reportar o summary e os 5 piores frames.
+
+
+Etapa 9 - Suite de testes jogaveis
+----------------------------------
+
+Objetivo:
+- Padronizar as sessoes de teste sem automatizar gameplay complexo demais.
+
+Roteiro recomendado:
+
+Teste A - Menu e idle
+- Ficar 1 minuto no menu inicial.
+- Objetivo: medir frame pacing sem gameplay pesado.
+
+Teste B - Training leve
+- 5 minutos em Training.
+- Fazer movimentos basicos e golpes normais.
+- Objetivo: input e estabilidade de frame.
+
+Teste C - Training pesado
+- 5 minutos usando supers, muitos hits, parry, efeitos e troca de posicao.
+- Objetivo: pico de render_tasks, cache miss e audio SFX.
+
+Teste D - Arcade
+- Jogar ao menos 3 lutas completas.
+- Objetivo: transicoes, BGM, carregamento e round flow.
+
+Teste E - Netplay, se aplicavel
+- Jogar 5 a 10 minutos.
+- Objetivo: separar input local de rollback/rede.
+
+Resultado esperado:
+- Cada teste deve gerar uma sessao propria ou um marcador no event_log.
+- O report ideal deve incluir:
+  - summary.txt
+  - descricao curta do teste
+  - se houve travada perceptivel
+  - momento aproximado da travada
+
+
+Ordem recomendada de implementacao
+----------------------------------
+
+1. Etapa 1: parametro --debug-mode.
+2. Etapa 2: modulo central de log.
+3. Etapa 3: frame timing e summary basico.
+4. Etapa 4: render stats.
+5. Etapa 5: audio/ADX/AFS.
+6. Etapa 6: input events compactos.
+7. Etapa 8: summary completo.
+8. Etapa 7: netplay, se o foco da rodada for online.
+9. Etapa 9: padronizar roteiros de teste.
+
+
+Cuidados de performance
+-----------------------
+
+- Nunca escrever log por frame quando --debug-mode estiver desligado.
+- Quando ligado, preferir buffers em memoria e flush periodico.
+- Evitar fprintf espalhado em caminhos quentes.
+- Medir o custo do proprio debug mode.
+- Nao gravar input bruto gigantesco sem filtro.
+- Nao fazer log de texto livre em todo frame.
+- CSV numerico e resumo final sao melhores para comparar sessoes.
+
+
+Arquivos mais provaveis de alteracao
+------------------------------------
+
+Base:
+- src/configuration.h
+- src/args.c
+- src/main.c
+- include/port/debug/debug_log.h
+- src/port/debug/debug_log.c
+
+Frame/render:
+- src/port/sdl/sdl_app.c
+- src/port/sdl/sdl_game_renderer.c
+
+Audio/I/O:
+- src/port/sound/adx.c
+- src/port/sound/spu.c
+- src/port/io/afs.c
+
+Input:
+- src/port/sdl/sdl_pad.c
+- src/sf33rd/Source/Game/io/ioconv.c
+
+Netplay:
+- src/netplay/netplay.c
+
+
+Como reportar resultados
+------------------------
+
+Depois de cada etapa implementada e testada, reportar:
+
+- comando usado para abrir o jogo
+- scale-mode usado
+- duracao aproximada do teste
+- modo testado: menu, training, arcade, netplay
+- summary.txt completo
+- se houve travada perceptivel
+- se houve atraso de input ou audio
+- se necessario, anexar ou copiar apenas as linhas dos CSVs perto dos piores frames
+

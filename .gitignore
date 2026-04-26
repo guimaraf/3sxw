@@ -26,3 +26,5 @@ states
 resources
 .old/
 githuberror.txt
+
+.future/

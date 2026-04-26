@@ -10,6 +10,10 @@ typedef struct NetplayConfiguration {
     int matchmaking_port;
 } NetplayConfiguration;
 
+typedef struct DebugRuntimeConfiguration {
+    int enabled;
+} DebugRuntimeConfiguration;
+
 #if DEBUG
 typedef struct TestRunnerConfiguration {
     bool enabled;
@@ -19,6 +23,7 @@ typedef struct TestRunnerConfiguration {
 
 typedef struct Configuration {
     NetplayConfiguration netplay;
+    DebugRuntimeConfiguration debug_runtime;
 #if DEBUG
     TestRunnerConfiguration test;
 #endif

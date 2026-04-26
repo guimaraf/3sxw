@@ -3,6 +3,7 @@
 #include "common.h"
 #include "configuration.h"
 #include "netplay/netplay.h"
+#include "port/debug/debug_log.h"
 #include "port/sdl/sdl_app.h"
 #include "sf33rd/AcrSDK/common/mlPAD.h"
 #include "sf33rd/AcrSDK/ps2/flps2debug.h"
@@ -71,6 +72,8 @@ static u8 dctex_linear_mem[0x800];
 static u8 texcash_melt_buffer_mem[0x1000];
 static u8 tpu_free_mem[0x2000];
 static MainPhase phase = MAIN_PHASE_INIT;
+static int main_argc = 0;
+static const char** main_argv = NULL;
 
 static u8* mppMalloc(u32 size) {
     return flAllocMemory(size);
@@ -178,6 +181,7 @@ static void initialize_game() {
 
 static void cleanup() {
     AFS_Finish();
+    DebugLog_Shutdown();
     SDLApp_Quit();
 }
 
@@ -412,6 +416,7 @@ static int loop() {
         switch (phase) {
         case MAIN_PHASE_INIT:
             SDLApp_PreInit();
+            DebugLog_Init(configuration.debug_runtime.enabled, main_argc, main_argv);
 
             if (Resources_Check()) {
                 initialize_game();
@@ -460,6 +465,8 @@ static int loop() {
 }
 
 int main(int argc, const char* argv[]) {
+    main_argc = argc;
+    main_argv = argv;
     read_args(argc, argv, &configuration);
     return loop();
 }
