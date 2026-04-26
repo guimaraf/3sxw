@@ -23,3 +23,21 @@ Nao substituir o caminho de textura padrao sem antes:
 - mapear quais handles sofrem mais invalidacao;
 - comparar visualmente o caminho experimental contra o caminho atual;
 - manter o experimento atras de `--debug-indexed-texture-path`.
+
+## Micro etapa 4.2
+
+A decomposicao dos misses e ativada somente quando `--debug-indexed-texture-path` tambem estiver ligado.
+
+Campos adicionados:
+- `texture_cache_misses_first_use`
+- `texture_cache_misses_after_palette_unlock`
+- `texture_cache_misses_after_texture_unlock`
+- `texture_cache_misses_after_release`
+- `texture_cache_misses_unknown`
+- `palette_unlocks`
+- `texture_unlocks`
+- `palette_cache_invalidated_textures`
+- `texture_cache_invalidated_textures`
+- `release_cache_invalidated_textures`
+
+Essa etapa ainda nao altera o caminho visual. Ela apenas explica por que uma textura SDL precisou ser recriada.

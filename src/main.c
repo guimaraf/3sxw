@@ -528,6 +528,21 @@ static int loop() {
                 .render_tasks = app_frame_timing.render_stats.render_tasks,
                 .geometry_calls = app_frame_timing.render_stats.geometry_calls,
                 .texture_cache_misses = app_frame_timing.render_stats.texture_cache_misses,
+                .texture_cache_misses_first_use = app_frame_timing.render_stats.texture_cache_misses_first_use,
+                .texture_cache_misses_after_palette_unlock =
+                    app_frame_timing.render_stats.texture_cache_misses_after_palette_unlock,
+                .texture_cache_misses_after_texture_unlock =
+                    app_frame_timing.render_stats.texture_cache_misses_after_texture_unlock,
+                .texture_cache_misses_after_release = app_frame_timing.render_stats.texture_cache_misses_after_release,
+                .texture_cache_misses_unknown = app_frame_timing.render_stats.texture_cache_misses_unknown,
+                .palette_unlocks = app_frame_timing.render_stats.palette_unlocks,
+                .texture_unlocks = app_frame_timing.render_stats.texture_unlocks,
+                .palette_cache_invalidated_textures =
+                    app_frame_timing.render_stats.palette_cache_invalidated_textures,
+                .texture_cache_invalidated_textures =
+                    app_frame_timing.render_stats.texture_cache_invalidated_textures,
+                .release_cache_invalidated_textures =
+                    app_frame_timing.render_stats.release_cache_invalidated_textures,
                 .render_sort_ms = app_frame_timing.render_stats.render_sort_ms,
                 .render_geometry_ms = app_frame_timing.render_stats.render_geometry_ms,
             };

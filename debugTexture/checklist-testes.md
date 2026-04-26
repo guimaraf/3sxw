@@ -27,3 +27,22 @@
 - HUD, timer e barras;
 - troca de round;
 - retorno ao menu.
+
+## Micro etapa 4.2
+
+1. Rodar com `--debug-mode`.
+   - Esperado: `render_stats.csv` contem as novas colunas.
+   - Esperado: colunas detalhadas de textura ficam zeradas sem `--debug-indexed-texture-path`.
+
+2. Rodar com `--debug-mode --debug-indexed-texture-path`.
+   - Esperado: `render_stats.csv` contem a decomposicao dos misses.
+   - Esperado: `summary.txt` contem os totais `total_texture_cache_misses_*`.
+   - Esperado: `event_log.csv` contem eventos como `texture_cache_miss_first_use`, `palette_unlock` e `palette_cache_invalidated_textures` quando ocorrerem.
+
+3. Conferir a soma.
+   - Esperado: `total_texture_cache_misses` deve ser igual a soma de:
+     - `total_texture_cache_misses_first_use`;
+     - `total_texture_cache_misses_after_palette_unlock`;
+     - `total_texture_cache_misses_after_texture_unlock`;
+     - `total_texture_cache_misses_after_release`;
+     - `total_texture_cache_misses_unknown`.

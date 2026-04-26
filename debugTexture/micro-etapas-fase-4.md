@@ -15,15 +15,22 @@ Teste esperado:
 
 ## 4.2 - Separar causas dos misses
 
-Escopo proposto:
+Escopo:
 - contar primeiro uso de textura;
 - contar miss apos `SDLGameRenderer_UnlockPalette`;
 - contar miss apos `SDLGameRenderer_UnlockTexture`;
+- contar miss apos release de textura/paleta;
+- contar miss de causa desconhecida;
 - contar quantas texturas cacheadas foram invalidadas por paleta;
 - contar quantas texturas cacheadas foram invalidadas por textura.
 
 Objetivo:
 - provar se o problema dominante e paleta, textura ou primeiro uso.
+
+Teste esperado:
+- com `--debug-mode`: colunas novas aparecem zeradas, mantendo o comportamento anterior;
+- com `--debug-mode --debug-indexed-texture-path`: colunas novas passam a separar a causa dos misses;
+- `texture_cache_misses` deve continuar representando o total antigo.
 
 ## 4.3 - Mapa de uso por handle
 

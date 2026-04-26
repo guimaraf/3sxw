@@ -23,6 +23,13 @@ typedef struct RenderTask {
     int index;
 } RenderTask;
 
+typedef enum TextureCacheInvalidationReason {
+    TEXTURE_CACHE_INVALIDATION_NONE,
+    TEXTURE_CACHE_INVALIDATION_PALETTE_UNLOCK,
+    TEXTURE_CACHE_INVALIDATION_TEXTURE_UNLOCK,
+    TEXTURE_CACHE_INVALIDATION_RELEASE,
+} TextureCacheInvalidationReason;
+
 SDL_Texture* cps3_canvas = NULL;
 
 static const int cps3_width = 384;
@@ -34,12 +41,26 @@ static SDL_Palette* palettes[FL_PALETTE_MAX] = { NULL };
 static SDL_Texture* textures[FL_PALETTE_MAX] = { NULL };
 static int texture_count = 0;
 static SDL_Texture* texture_cache[FL_TEXTURE_MAX][FL_PALETTE_MAX + 1] = { { NULL } };
+static bool texture_cache_has_been_created[FL_TEXTURE_MAX][FL_PALETTE_MAX + 1] = { { false } };
+static TextureCacheInvalidationReason texture_cache_last_invalidation[FL_TEXTURE_MAX][FL_PALETTE_MAX + 1] = { { 0 } };
 static SDL_Texture* textures_to_destroy[1024] = { NULL };
 static int textures_to_destroy_count = 0;
 static RenderTask render_tasks[RENDER_TASK_MAX] = { 0 };
 static int render_task_count = 0;
 static int texture_cache_miss_count = 0;
+static int texture_cache_miss_first_use_count = 0;
+static int texture_cache_miss_after_palette_unlock_count = 0;
+static int texture_cache_miss_after_texture_unlock_count = 0;
+static int texture_cache_miss_after_release_count = 0;
+static int texture_cache_miss_unknown_count = 0;
+static int palette_unlock_count = 0;
+static int texture_unlock_count = 0;
+static int palette_cache_invalidated_texture_count = 0;
+static int texture_cache_invalidated_texture_count = 0;
+static int release_cache_invalidated_texture_count = 0;
 static bool debug_indexed_texture_path_enabled = false;
+static TextureCacheInvalidationReason active_texture_invalidation_reason = TEXTURE_CACHE_INVALIDATION_RELEASE;
+static TextureCacheInvalidationReason active_palette_invalidation_reason = TEXTURE_CACHE_INVALIDATION_RELEASE;
 
 // Debugging
 
@@ -169,6 +190,85 @@ static double elapsed_ms(Uint64 start_ns, Uint64 end_ns) {
     return (double)(end_ns - start_ns) / 1e6;
 }
 
+static bool should_record_texture_diagnostics() {
+    return DebugLog_IsEnabled() && debug_indexed_texture_path_enabled;
+}
+
+static void reset_texture_diagnostics() {
+    texture_cache_miss_first_use_count = 0;
+    texture_cache_miss_after_palette_unlock_count = 0;
+    texture_cache_miss_after_texture_unlock_count = 0;
+    texture_cache_miss_after_release_count = 0;
+    texture_cache_miss_unknown_count = 0;
+    palette_unlock_count = 0;
+    texture_unlock_count = 0;
+    palette_cache_invalidated_texture_count = 0;
+    texture_cache_invalidated_texture_count = 0;
+    release_cache_invalidated_texture_count = 0;
+}
+
+static void record_texture_cache_invalidation(TextureCacheInvalidationReason reason) {
+    if (!should_record_texture_diagnostics()) {
+        return;
+    }
+
+    switch (reason) {
+    case TEXTURE_CACHE_INVALIDATION_PALETTE_UNLOCK:
+        palette_cache_invalidated_texture_count += 1;
+        break;
+
+    case TEXTURE_CACHE_INVALIDATION_TEXTURE_UNLOCK:
+        texture_cache_invalidated_texture_count += 1;
+        break;
+
+    case TEXTURE_CACHE_INVALIDATION_RELEASE:
+        release_cache_invalidated_texture_count += 1;
+        break;
+
+    case TEXTURE_CACHE_INVALIDATION_NONE:
+    default:
+        break;
+    }
+}
+
+static void record_texture_cache_miss(int texture_index, int palette_handle) {
+    if (!DebugLog_IsEnabled()) {
+        return;
+    }
+
+    texture_cache_miss_count += 1;
+
+    if (!debug_indexed_texture_path_enabled) {
+        return;
+    }
+
+    if (!texture_cache_has_been_created[texture_index][palette_handle]) {
+        texture_cache_miss_first_use_count += 1;
+    } else {
+        switch (texture_cache_last_invalidation[texture_index][palette_handle]) {
+        case TEXTURE_CACHE_INVALIDATION_PALETTE_UNLOCK:
+            texture_cache_miss_after_palette_unlock_count += 1;
+            break;
+
+        case TEXTURE_CACHE_INVALIDATION_TEXTURE_UNLOCK:
+            texture_cache_miss_after_texture_unlock_count += 1;
+            break;
+
+        case TEXTURE_CACHE_INVALIDATION_RELEASE:
+            texture_cache_miss_after_release_count += 1;
+            break;
+
+        case TEXTURE_CACHE_INVALIDATION_NONE:
+        default:
+            texture_cache_miss_unknown_count += 1;
+            break;
+        }
+    }
+
+    texture_cache_has_been_created[texture_index][palette_handle] = true;
+    texture_cache_last_invalidation[texture_index][palette_handle] = TEXTURE_CACHE_INVALIDATION_NONE;
+}
+
 // Colors
 
 #define clut_shuf(x) (((x) & ~0x18) | ((((x) & 0x08) << 1) | (((x) & 0x10) >> 1)))
@@ -238,6 +338,7 @@ void SDLGameRenderer_SetDebugIndexedTexturePathEnabled(bool enabled) {
 void SDLGameRenderer_BeginFrame() {
     if (DebugLog_IsEnabled()) {
         texture_cache_miss_count = 0;
+        reset_texture_diagnostics();
     }
 
     // Clear canvas
@@ -263,6 +364,16 @@ void SDLGameRenderer_RenderFrame(SDLGameRendererStats* stats) {
         SDL_zero(*stats);
         stats->render_tasks = render_task_count;
         stats->texture_cache_misses = texture_cache_miss_count;
+        stats->texture_cache_misses_first_use = texture_cache_miss_first_use_count;
+        stats->texture_cache_misses_after_palette_unlock = texture_cache_miss_after_palette_unlock_count;
+        stats->texture_cache_misses_after_texture_unlock = texture_cache_miss_after_texture_unlock_count;
+        stats->texture_cache_misses_after_release = texture_cache_miss_after_release_count;
+        stats->texture_cache_misses_unknown = texture_cache_miss_unknown_count;
+        stats->palette_unlocks = palette_unlock_count;
+        stats->texture_unlocks = texture_unlock_count;
+        stats->palette_cache_invalidated_textures = palette_cache_invalidated_texture_count;
+        stats->texture_cache_invalidated_textures = texture_cache_invalidated_texture_count;
+        stats->release_cache_invalidated_textures = release_cache_invalidated_texture_count;
     }
 
     const Uint64 sort_start_ns = stats != NULL ? SDL_GetTicksNS() : 0;
@@ -320,7 +431,13 @@ void SDLGameRenderer_UnlockPalette(unsigned int ph) {
     const int palette_handle = ph;
 
     if ((palette_handle > 0) && (palette_handle < FL_PALETTE_MAX)) {
+        if (should_record_texture_diagnostics()) {
+            palette_unlock_count += 1;
+        }
+
+        active_palette_invalidation_reason = TEXTURE_CACHE_INVALIDATION_PALETTE_UNLOCK;
         SDLGameRenderer_DestroyPalette(palette_handle);
+        active_palette_invalidation_reason = TEXTURE_CACHE_INVALIDATION_RELEASE;
         SDLGameRenderer_CreatePalette(ph << 16);
     }
 }
@@ -329,7 +446,13 @@ void SDLGameRenderer_UnlockTexture(unsigned int th) {
     const int texture_handle = th;
 
     if ((texture_handle > 0) && (texture_handle < FL_TEXTURE_MAX)) {
+        if (should_record_texture_diagnostics()) {
+            texture_unlock_count += 1;
+        }
+
+        active_texture_invalidation_reason = TEXTURE_CACHE_INVALIDATION_TEXTURE_UNLOCK;
         SDLGameRenderer_DestroyTexture(texture_handle);
+        active_texture_invalidation_reason = TEXTURE_CACHE_INVALIDATION_RELEASE;
         SDLGameRenderer_CreateTexture(th);
     }
 }
@@ -381,6 +504,8 @@ void SDLGameRenderer_DestroyTexture(unsigned int texture_handle) {
             continue;
         }
 
+        texture_cache_last_invalidation[texture_index][i] = active_texture_invalidation_reason;
+        record_texture_cache_invalidation(active_texture_invalidation_reason);
         push_texture_to_destroy(*texture_p);
         *texture_p = NULL;
     }
@@ -451,6 +576,8 @@ void SDLGameRenderer_DestroyPalette(unsigned int palette_handle) {
             continue;
         }
 
+        texture_cache_last_invalidation[i][palette_handle] = active_palette_invalidation_reason;
+        record_texture_cache_invalidation(active_palette_invalidation_reason);
         push_texture_to_destroy(*texture_p);
         *texture_p = NULL;
     }
@@ -484,9 +611,7 @@ void SDLGameRenderer_SetTexture(unsigned int th) {
         SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
         texture_cache[texture_handle - 1][palette_handle] = texture;
 
-        if (DebugLog_IsEnabled()) {
-            texture_cache_miss_count += 1;
-        }
+        record_texture_cache_miss(texture_handle - 1, palette_handle);
     }
 
     push_texture(texture);

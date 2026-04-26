@@ -9,7 +9,8 @@ Objetivo:
 - evitar mudancas amplas no render padrao sem comparacao visual e numerica.
 
 Estado atual:
-- micro etapa 4.1 cria a flag experimental e a documentacao;
+- micro etapa 4.1 criou a flag experimental e a documentacao;
+- micro etapa 4.2 separa as causas dos misses quando a flag experimental esta ligada;
 - a flag ainda nao muda o algoritmo de renderizacao;
 - o caminho padrao continua usando textura SDL RGBA criada a partir da surface paletizada.
 

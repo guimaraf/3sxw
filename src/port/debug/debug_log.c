@@ -25,6 +25,16 @@ static Uint64 late_frame_count = 0;
 static int max_render_tasks = 0;
 static int max_geometry_calls = 0;
 static Uint64 total_texture_cache_misses = 0;
+static Uint64 total_texture_cache_misses_first_use = 0;
+static Uint64 total_texture_cache_misses_after_palette_unlock = 0;
+static Uint64 total_texture_cache_misses_after_texture_unlock = 0;
+static Uint64 total_texture_cache_misses_after_release = 0;
+static Uint64 total_texture_cache_misses_unknown = 0;
+static Uint64 total_palette_unlocks = 0;
+static Uint64 total_texture_unlocks = 0;
+static Uint64 total_palette_cache_invalidated_textures = 0;
+static Uint64 total_texture_cache_invalidated_textures = 0;
+static Uint64 total_release_cache_invalidated_textures = 0;
 static double worst_render_sort_ms = 0.0;
 static double worst_render_geometry_ms = 0.0;
 static Uint64 worst_render_sort_frame = 0;
@@ -159,6 +169,32 @@ static void write_summary_file() {
     fprintf(file, "max_render_tasks=%d\n", max_render_tasks);
     fprintf(file, "max_geometry_calls=%d\n", max_geometry_calls);
     fprintf(file, "total_texture_cache_misses=%llu\n", (unsigned long long)total_texture_cache_misses);
+    fprintf(file,
+            "total_texture_cache_misses_first_use=%llu\n",
+            (unsigned long long)total_texture_cache_misses_first_use);
+    fprintf(file,
+            "total_texture_cache_misses_after_palette_unlock=%llu\n",
+            (unsigned long long)total_texture_cache_misses_after_palette_unlock);
+    fprintf(file,
+            "total_texture_cache_misses_after_texture_unlock=%llu\n",
+            (unsigned long long)total_texture_cache_misses_after_texture_unlock);
+    fprintf(file,
+            "total_texture_cache_misses_after_release=%llu\n",
+            (unsigned long long)total_texture_cache_misses_after_release);
+    fprintf(file,
+            "total_texture_cache_misses_unknown=%llu\n",
+            (unsigned long long)total_texture_cache_misses_unknown);
+    fprintf(file, "total_palette_unlocks=%llu\n", (unsigned long long)total_palette_unlocks);
+    fprintf(file, "total_texture_unlocks=%llu\n", (unsigned long long)total_texture_unlocks);
+    fprintf(file,
+            "total_palette_cache_invalidated_textures=%llu\n",
+            (unsigned long long)total_palette_cache_invalidated_textures);
+    fprintf(file,
+            "total_texture_cache_invalidated_textures=%llu\n",
+            (unsigned long long)total_texture_cache_invalidated_textures);
+    fprintf(file,
+            "total_release_cache_invalidated_textures=%llu\n",
+            (unsigned long long)total_release_cache_invalidated_textures);
     fprintf(file, "worst_render_sort_ms=%.3f\n", worst_render_sort_ms);
     fprintf(file, "worst_render_sort_frame=%llu\n", (unsigned long long)worst_render_sort_frame);
     fprintf(file, "worst_render_geometry_ms=%.3f\n", worst_render_geometry_ms);
@@ -197,6 +233,16 @@ static void reset_frame_timing_stats() {
     max_render_tasks = 0;
     max_geometry_calls = 0;
     total_texture_cache_misses = 0;
+    total_texture_cache_misses_first_use = 0;
+    total_texture_cache_misses_after_palette_unlock = 0;
+    total_texture_cache_misses_after_texture_unlock = 0;
+    total_texture_cache_misses_after_release = 0;
+    total_texture_cache_misses_unknown = 0;
+    total_palette_unlocks = 0;
+    total_texture_unlocks = 0;
+    total_palette_cache_invalidated_textures = 0;
+    total_texture_cache_invalidated_textures = 0;
+    total_release_cache_invalidated_textures = 0;
     worst_render_sort_ms = 0.0;
     worst_render_geometry_ms = 0.0;
     worst_render_sort_frame = 0;
@@ -220,7 +266,12 @@ static void open_render_stats_file() {
         return;
     }
 
-    fprintf(render_stats_file, "frame,render_tasks,geometry_calls,texture_cache_misses,render_sort_ms,render_geometry_ms\n");
+    fprintf(render_stats_file,
+            "frame,render_tasks,geometry_calls,texture_cache_misses,texture_cache_misses_first_use,"
+            "texture_cache_misses_after_palette_unlock,texture_cache_misses_after_texture_unlock,"
+            "texture_cache_misses_after_release,texture_cache_misses_unknown,palette_unlocks,texture_unlocks,"
+            "palette_cache_invalidated_textures,texture_cache_invalidated_textures,"
+            "release_cache_invalidated_textures,render_sort_ms,render_geometry_ms\n");
 }
 
 static void open_event_log_file() {
@@ -431,11 +482,21 @@ void DebugLog_RecordRenderStats(const DebugRenderStats* stats) {
 
     if (render_stats_file != NULL) {
         fprintf(render_stats_file,
-                "%llu,%d,%d,%d,%.3f,%.3f\n",
+                "%llu,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%.3f,%.3f\n",
                 (unsigned long long)stats->frame,
                 stats->render_tasks,
                 stats->geometry_calls,
                 stats->texture_cache_misses,
+                stats->texture_cache_misses_first_use,
+                stats->texture_cache_misses_after_palette_unlock,
+                stats->texture_cache_misses_after_texture_unlock,
+                stats->texture_cache_misses_after_release,
+                stats->texture_cache_misses_unknown,
+                stats->palette_unlocks,
+                stats->texture_unlocks,
+                stats->palette_cache_invalidated_textures,
+                stats->texture_cache_invalidated_textures,
+                stats->release_cache_invalidated_textures,
                 stats->render_sort_ms,
                 stats->render_geometry_ms);
 
@@ -456,6 +517,67 @@ void DebugLog_RecordRenderStats(const DebugRenderStats* stats) {
     if (stats->texture_cache_misses > 0) {
         total_texture_cache_misses += (Uint64)stats->texture_cache_misses;
         write_event(stats->frame, "texture_cache_miss", "%d", stats->texture_cache_misses);
+    }
+
+    if (stats->texture_cache_misses_first_use > 0) {
+        total_texture_cache_misses_first_use += (Uint64)stats->texture_cache_misses_first_use;
+        write_event(stats->frame, "texture_cache_miss_first_use", "%d", stats->texture_cache_misses_first_use);
+    }
+
+    if (stats->texture_cache_misses_after_palette_unlock > 0) {
+        total_texture_cache_misses_after_palette_unlock +=
+            (Uint64)stats->texture_cache_misses_after_palette_unlock;
+        write_event(stats->frame,
+                    "texture_cache_miss_after_palette_unlock",
+                    "%d",
+                    stats->texture_cache_misses_after_palette_unlock);
+    }
+
+    if (stats->texture_cache_misses_after_texture_unlock > 0) {
+        total_texture_cache_misses_after_texture_unlock +=
+            (Uint64)stats->texture_cache_misses_after_texture_unlock;
+        write_event(stats->frame,
+                    "texture_cache_miss_after_texture_unlock",
+                    "%d",
+                    stats->texture_cache_misses_after_texture_unlock);
+    }
+
+    if (stats->texture_cache_misses_after_release > 0) {
+        total_texture_cache_misses_after_release += (Uint64)stats->texture_cache_misses_after_release;
+        write_event(stats->frame, "texture_cache_miss_after_release", "%d", stats->texture_cache_misses_after_release);
+    }
+
+    if (stats->texture_cache_misses_unknown > 0) {
+        total_texture_cache_misses_unknown += (Uint64)stats->texture_cache_misses_unknown;
+        write_event(stats->frame, "texture_cache_miss_unknown", "%d", stats->texture_cache_misses_unknown);
+    }
+
+    if (stats->palette_unlocks > 0) {
+        total_palette_unlocks += (Uint64)stats->palette_unlocks;
+        write_event(stats->frame, "palette_unlock", "%d", stats->palette_unlocks);
+    }
+
+    if (stats->texture_unlocks > 0) {
+        total_texture_unlocks += (Uint64)stats->texture_unlocks;
+        write_event(stats->frame, "texture_unlock", "%d", stats->texture_unlocks);
+    }
+
+    if (stats->palette_cache_invalidated_textures > 0) {
+        total_palette_cache_invalidated_textures += (Uint64)stats->palette_cache_invalidated_textures;
+        write_event(
+            stats->frame, "palette_cache_invalidated_textures", "%d", stats->palette_cache_invalidated_textures);
+    }
+
+    if (stats->texture_cache_invalidated_textures > 0) {
+        total_texture_cache_invalidated_textures += (Uint64)stats->texture_cache_invalidated_textures;
+        write_event(
+            stats->frame, "texture_cache_invalidated_textures", "%d", stats->texture_cache_invalidated_textures);
+    }
+
+    if (stats->release_cache_invalidated_textures > 0) {
+        total_release_cache_invalidated_textures += (Uint64)stats->release_cache_invalidated_textures;
+        write_event(
+            stats->frame, "release_cache_invalidated_textures", "%d", stats->release_cache_invalidated_textures);
     }
 
     if (stats->render_sort_ms > worst_render_sort_ms) {

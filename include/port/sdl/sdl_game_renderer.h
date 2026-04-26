@@ -38,6 +38,16 @@ typedef struct SDLGameRendererStats {
     int render_tasks;
     int geometry_calls;
     int texture_cache_misses;
+    int texture_cache_misses_first_use;
+    int texture_cache_misses_after_palette_unlock;
+    int texture_cache_misses_after_texture_unlock;
+    int texture_cache_misses_after_release;
+    int texture_cache_misses_unknown;
+    int palette_unlocks;
+    int texture_unlocks;
+    int palette_cache_invalidated_textures;
+    int texture_cache_invalidated_textures;
+    int release_cache_invalidated_textures;
     double render_sort_ms;
     double render_geometry_ms;
 } SDLGameRendererStats;
