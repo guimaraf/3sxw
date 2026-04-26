@@ -22,6 +22,80 @@ Observacao:
 - Se for realmente necessario aceitar -debug-mode, isso pode ser adicionado depois como compatibilidade.
 
 
+Descobertas tecnicas importantes
+--------------------------------
+
+Estas conclusoes foram adicionadas depois dos testes reais da fase 4 e da
+pesquisa tecnica sobre CPS-3/3rd Strike:
+
+- O caminho normal do jogo nao deve ser alterado enquanto o caminho
+  experimental estiver sendo validado.
+- O caminho experimental deve ficar atras de parametro explicito:
+  --debug-mode --debug-indexed-texture-path.
+- O objetivo principal nao e apenas reduzir cache miss, mas manter o frame limpo:
+  durante a luta nao deve haver acesso a disco, criacao pesada de textura nem
+  conversao RGBA massiva.
+- O CPS-3 trabalha com memoria dedicada para graficos e paletas. A documentacao
+  tecnica publica indica DMA para carregar dados de paleta em palette RAM.
+- O driver do MAME menciona efeitos de palette DMA e efeitos que sao manipulacao
+  de paleta, nao blending real. Isso combina com os logs coletados, onde varias
+  invalidacoes aparecem ligadas a palette unlock durante gameplay.
+- Tambem ha indicios de que dados do CD sao instalados/carregados para SIMMs ou
+  flash, evitando depender do drive de CD durante gameplay normal.
+- Nao foi encontrada confirmacao publica forte de que todas as variacoes de
+  paleta de uma luta ja estejam prontas na tela de loading/versus.
+- Portanto, e razoavel assumir que loading/versus prepara ativos grandes e
+  algumas paletas iniciais, mas fogo, choque, hit flash, sombras, supers e
+  transicoes podem continuar alterando paletas durante a luta.
+
+Fontes tecnicas usadas como referencia:
+- MAME CPS-3 driver: https://raw.githubusercontent.com/mamedev/mame/master/src/mame/capcom/cps3.cpp
+- Data Crystal CPS3 hardware information: https://datacrystal.tcrf.net/wiki/CPS3%3AHardware_information
+- CPS-3 SIMM requirements: https://junkerhq.net/xrgb/index.php/CPS-III
+
+
+Direcao arquitetural acordada para textura/paleta
+-------------------------------------------------
+
+O caminho correto para a fase atual e tratar prewarm/cache como complemento, nao
+como solucao principal.
+
+Decisoes:
+- Nao criar cache em disco com milhares de combinacoes finais RGBA.
+- Cache em disco, se usado no futuro, deve ser limitado a dados estaveis:
+  textura indexada decodificada, metadados, tabelas de offsets e paletas
+  conhecidas.
+- Durante gameplay, o jogo nao deve buscar nada em disco para resolver cor de
+  textura/paleta.
+- Antes da luta ou durante telas de loading/versus, pode carregar, decodificar e
+  preaquecer dados estaveis.
+- Durante a luta, troca de paleta deve ser uma operacao pequena e previsivel.
+- A solucao estrutural desejada e separar textura indexada da paleta:
+  - textura de indices na GPU ou em estrutura equivalente;
+  - paleta/CLUT separada;
+  - shader ou caminho de render equivalente resolve indice -> cor final.
+- Enquanto o shader/caminho indexado real nao existir, qualquer conversao RGBA
+  deve continuar sendo tratada como prototipo de diagnostico, nao como solucao
+  final.
+- Object pooling pode reduzir custo de alocacao, mas nao resolve a causa
+  estrutural se o renderer continuar recriando combinacoes finais RGBA.
+
+
+Regras SDL3/frontend para as proximas fases
+-------------------------------------------
+
+Estas regras vieram da analise especializada de frontend SDL3 para jogo de luta:
+
+- Preservar input latency e command reliability como requisitos principais.
+- Preservar frame pacing e comportamento deterministico.
+- Evitar alocacao, upload pesado e conversao grande no hot path de render.
+- Manter renderer, input, audio, janela e debug com responsabilidades claras.
+- Nao misturar mudancas de renderer com mudancas de gameplay.
+- Debug overlay/logs nao devem alterar consumo de input ou timing de gameplay.
+- Preferir mudancas pequenas, atras de flag, com metricas antes/depois.
+- Nao assumir API SDL2 em codigo SDL3; seguir padroes ja existentes no projeto.
+
+
 Etapa 1 - Adicionar parametro --debug-mode sem coletar dados ainda
 ------------------------------------------------------------------
 
@@ -180,6 +254,10 @@ Resultado esperado:
 - render_tasks deve variar por cena, mas nao chegar perto do limite atual sem aviso.
 - texture_cache_misses devem aparecer principalmente em transicoes, primeiro uso de personagens/efeitos e carregamentos.
 - Durante round estabilizado, texture_cache_misses idealmente deve cair para 0.
+- Se --debug-indexed-texture-path estiver ativo, o caminho experimental deve
+  reduzir recriacoes por paleta/textura sem piorar frame pacing.
+- Reduzir texture_cache_misses nao e suficiente se o custo for transferido para
+  conversao RGBA massiva ou upload pesado durante gameplay.
 
 Testes sugeridos:
 - Rodar com --debug-mode.
@@ -190,6 +268,89 @@ Testes sugeridos:
   - max_render_tasks
   - total_texture_cache_misses
   - se algum spike visual coincide com texture_cache_miss
+
+
+Etapa 4.x - Caminho experimental de textura indexada
+----------------------------------------------------
+
+Objetivo:
+- Evoluir o renderer em micro etapas ate um modelo onde textura indexada e
+  paleta sejam tratadas separadamente.
+- Manter todo experimento atras de --debug-mode --debug-indexed-texture-path.
+- Garantir que SF3.exe normal e SF3.exe --debug-mode continuem servindo como
+  linha base.
+
+Micro etapas:
+
+4.1 - Diagnostico de cache de textura
+- Medir cache hit/miss.
+- Confirmar se misses acontecem durante gameplay real.
+- Resultado desejado: saber se o problema existe e em quais cenas aparece.
+
+4.2 - Estatisticas de handles de textura e paleta
+- Registrar quais handles aparecem mais.
+- Separar menu, arcade, round, transicoes e efeitos.
+- Resultado desejado: identificar texturas/paletas mais importantes.
+
+4.3 - Motivo de invalidacao
+- Separar misses por first use, palette unlock, texture unlock e release.
+- Resultado desejado: confirmar se a origem dominante e paleta, textura ou
+  primeiro uso.
+
+4.4 - Prototipo temporario com textura atualizavel
+- Criar caminho experimental sem alterar o caminho normal.
+- Reduzir recriacao de textura por combinacao textura/paleta.
+- Medir custo de updates e conversao.
+- Resultado desejado: provar comportamento e custo antes de decidir a solucao
+  estrutural.
+- Observacao importante: se o prototipo reduzir misses mas criar muitos updates
+  RGBA caros, ele nao deve ser considerado solucao final.
+
+4.5 - Caminho indexado real ou shader
+- Investigar e implementar, se viavel, textura de indices + paleta separada.
+- A paleta deve ser pequena e atualizavel.
+- A textura indexada deve ser estavel sempre que os indices nao mudarem.
+- O shader/caminho equivalente deve resolver indice -> cor final no render.
+- Resultado desejado: troca de paleta durante gameplay vira update pequeno de
+  paleta, nao reconversao de textura inteira.
+
+4.6 - Prewarm antes da luta
+- Depois do caminho indexado estar correto, adicionar prewarm apenas para dados
+  estaveis.
+- O prewarm pode acontecer antes da luta ou em loading/versus.
+- Durante a luta, nao deve haver leitura de disco para resolver textura/paleta.
+- Resultado desejado: reduzir first-use stutter sem criar cache explosivo.
+
+Arquivos provaveis:
+- src/port/sdl/sdl_game_renderer.c
+- include/port/sdl/sdl_game_renderer.h, se novas metricas publicas forem necessarias
+- include/port/debug/debug_log.h
+- src/port/debug/debug_log.c
+- src/main.c, somente se novas metricas precisarem ser agregadas no summary
+- debugTexture/README.md
+- debugTexture/micro-etapas-fase-4.md
+- debugTexture/analise-texturas.md
+- debugTexture/checklist-testes.md
+
+Metricas obrigatorias no caminho experimental:
+- total_texture_cache_misses
+- texture_cache_misses por motivo
+- total_palette_unlocks
+- total_texture_unlocks
+- invalidacoes por palette unlock
+- invalidacoes por texture unlock
+- indexed_texture_updates, enquanto o prototipo RGBA existir
+- indexed_texture_update_pixels, enquanto o prototipo RGBA existir
+- indexed_texture_update_ms, enquanto o prototipo RGBA existir
+- worst_frame_ms, p95, p99 e late_frames
+
+Criterios para nao encerrar uma micro etapa:
+- SF3.exe normal cria debug ou muda comportamento.
+- SF3.exe --debug-mode fica diferente da linha base esperada.
+- --debug-indexed-texture-path reduz misses mas cria spikes maiores de frame.
+- O prototipo usa disco durante gameplay.
+- Ha corrupcao visual em personagens, HUD, efeitos, sombras ou transicoes.
+- Ha piora perceptivel de input, audio ou frame pacing.
 
 
 Etapa 5 - Medir audio e carregamento de BGM/ADX
@@ -424,11 +585,12 @@ Ordem recomendada de implementacao
 2. Etapa 2: modulo central de log.
 3. Etapa 3: frame timing e summary basico.
 4. Etapa 4: render stats.
-5. Etapa 5: audio/ADX/AFS.
-6. Etapa 6: input events compactos.
-7. Etapa 8: summary completo.
-8. Etapa 7: netplay, se o foco da rodada for online.
-9. Etapa 9: padronizar roteiros de teste.
+5. Etapa 4.x: caminho experimental de textura indexada, em micro etapas.
+6. Etapa 5: audio/ADX/AFS.
+7. Etapa 6: input events compactos.
+8. Etapa 8: summary completo.
+9. Etapa 7: netplay, se o foco da rodada for online.
+10. Etapa 9: padronizar roteiros de teste.
 
 
 Cuidados de performance
@@ -441,6 +603,13 @@ Cuidados de performance
 - Nao gravar input bruto gigantesco sem filtro.
 - Nao fazer log de texto livre em todo frame.
 - CSV numerico e resumo final sao melhores para comparar sessoes.
+- Nao usar disco durante gameplay para resolver textura, paleta, shader ou cache.
+- Evitar criar/destruir texturas no caminho quente da luta.
+- Evitar conversao RGBA massiva por frame.
+- Se houver prewarm, ele deve ocorrer antes da luta ou em telas de carregamento,
+  nunca como trabalho inesperado no meio do round.
+- Qualquer otimizacao de render deve ser medida junto com frame timing e input,
+  porque ganho visual nao pode custar responsividade.
 
 
 Arquivos mais provaveis de alteracao
@@ -483,4 +652,3 @@ Depois de cada etapa implementada e testada, reportar:
 - se houve travada perceptivel
 - se houve atraso de input ou audio
 - se necessario, anexar ou copiar apenas as linhas dos CSVs perto dos piores frames
-

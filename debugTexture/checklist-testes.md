@@ -63,3 +63,18 @@
    - Fazer golpes normais, especiais, super arts, blocks e hits.
    - Fechar pelo menu.
    - Ordenar os CSVs por `cache_misses`, `miss_after_texture_unlock` e `invalidated_by_texture_unlock`.
+
+## Micro etapa 4.4
+
+1. Rodar com `--debug-mode`.
+   - Esperado: comportamento visual igual ao anterior.
+   - Esperado: sem campos de update indexado relevantes no `summary.txt`.
+
+2. Rodar com `--debug-mode --debug-indexed-texture-path`.
+   - Esperado: jogo abre e renderiza corretamente.
+   - Esperado: `total_indexed_texture_updates` maior que zero.
+   - Esperado: `texture_cache_misses_after_palette_unlock` reduzido em relacao ao teste da 4.3.
+
+3. Teste visual obrigatorio.
+   - Verificar menu, selecao, round, HUD, sombras, hits, blocks, especiais e transicoes.
+   - Se houver cor errada, sprite piscando, textura antiga ou frame visualmente incorreto, parar e analisar antes de ampliar o prototipo.

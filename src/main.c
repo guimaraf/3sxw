@@ -545,6 +545,9 @@ static int loop() {
                     app_frame_timing.render_stats.texture_cache_invalidated_textures,
                 .release_cache_invalidated_textures =
                     app_frame_timing.render_stats.release_cache_invalidated_textures,
+                .indexed_texture_updates = app_frame_timing.render_stats.indexed_texture_updates,
+                .indexed_texture_update_pixels = app_frame_timing.render_stats.indexed_texture_update_pixels,
+                .indexed_texture_update_ms = app_frame_timing.render_stats.indexed_texture_update_ms,
                 .render_sort_ms = app_frame_timing.render_stats.render_sort_ms,
                 .render_geometry_ms = app_frame_timing.render_stats.render_geometry_ms,
             };

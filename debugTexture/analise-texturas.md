@@ -64,3 +64,25 @@ Interpretacao:
 - poucos handles com muitos misses indicam alvo bom para prototipo;
 - muitos handles com poucos misses indicam churn distribuido, mais arriscado de otimizar pontualmente;
 - muitos `miss_after_texture_unlock` reforcam que o problema vem de atualizacao de dados de textura, nao de troca de paleta.
+
+## Micro etapa 4.4
+
+O prototipo nao usa shader. O SDL renderer atual nao expoe um caminho simples para aplicar paleta separada em GPU. Por isso, a primeira versao experimental mantem a API de render atual e troca apenas a estrategia interna das texturas paletizadas:
+
+- cria `SDL_Texture` streaming em formato `SDL_PIXELFORMAT_RGBA32`;
+- converte os pixels indexados usando a paleta atual;
+- em `UnlockPalette`, marca as texturas streaming associadas como dirty;
+- em `UnlockTexture`, marca as variantes streaming da textura como dirty;
+- em `SetTexture`, atualiza de forma lazy apenas a combinacao textura/paleta realmente solicitada;
+- se a textura ja foi usada no frame atual, o caminho preserva a semantica antiga e deixa a recriacao acontecer.
+
+Essa abordagem ainda nao e o modelo final de textura indexada + paleta separada, mas testa a parte mais importante com baixo risco: evitar destruir/recriar `SDL_Texture` a cada atualizacao de paleta.
+
+Novos campos:
+- `indexed_texture_updates`
+- `indexed_texture_update_pixels`
+- `indexed_texture_update_ms`
+- `total_indexed_texture_updates`
+- `total_indexed_texture_update_pixels`
+- `total_indexed_texture_update_ms`
+- `worst_indexed_texture_update_ms`

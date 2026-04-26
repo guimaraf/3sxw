@@ -54,13 +54,23 @@ Teste esperado:
 
 ## 4.4 - Prototipo isolado de caminho indexado
 
-Escopo proposto:
-- manter dados indexados separados da paleta;
+Escopo:
+- criar um caminho experimental para texturas paletizadas;
+- trocar `SDL_CreateTextureFromSurface` por textura streaming RGBA atualizavel no modo experimental;
+- marcar texturas cacheadas como dirty em `UnlockPalette` e `UnlockTexture`;
+- atualizar de forma lazy somente a combinacao textura/paleta solicitada por `SetTexture`;
 - ativar somente com `--debug-indexed-texture-path`;
 - preservar caminho padrao intacto.
 
 Objetivo:
-- comparar imagem e custo sem risco para o renderer atual.
+- reduzir recriacao/destruicao de `SDL_Texture` sem alterar o modo normal.
+- comparar imagem e custo contra o caminho atual.
+
+Teste esperado:
+- com `--debug-mode`: comportamento e logs do caminho padrao continuam iguais;
+- com `--debug-mode --debug-indexed-texture-path`: `texture_cache_misses_after_palette_unlock` deve cair bastante se o prototipo estiver funcionando;
+- `summary.txt` passa a registrar `total_indexed_texture_updates`, `total_indexed_texture_update_pixels` e tempo de update;
+- qualquer regressao visual deve ser tratada como bloqueio antes de avançar.
 
 ## 4.5 - Comparacao visual e regressao
 

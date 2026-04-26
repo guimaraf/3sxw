@@ -31,6 +31,9 @@ typedef struct DebugRenderStats {
     int palette_cache_invalidated_textures;
     int texture_cache_invalidated_textures;
     int release_cache_invalidated_textures;
+    int indexed_texture_updates;
+    int indexed_texture_update_pixels;
+    double indexed_texture_update_ms;
     double render_sort_ms;
     double render_geometry_ms;
 } DebugRenderStats;
