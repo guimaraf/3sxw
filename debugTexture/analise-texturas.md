@@ -86,3 +86,35 @@ Novos campos:
 - `total_indexed_texture_update_pixels`
 - `total_indexed_texture_update_ms`
 - `worst_indexed_texture_update_ms`
+
+## Micro etapa 4.5
+
+O caminho experimental passa a tentar uma textura paletizada real do SDL3.
+
+Modelo desejado:
+- a textura SDL guarda pixels indexados;
+- a paleta SDL fica associada a textura com `SDL_SetTexturePalette`;
+- quando a paleta muda, o renderer atualiza apenas a paleta;
+- quando os indices da textura mudam, o renderer atualiza apenas os pixels indexados;
+- a conversao textura+paleta para RGBA deixa de ser o caminho principal.
+
+Fallback:
+- se o renderer/driver nao aceitar textura paletizada, o codigo volta para o
+  prototipo RGBA streaming da 4.4;
+- isso e registrado em `indexed_texture_rgba_fallbacks`;
+- o fallback tambem e agregado como `rgba_fallbacks` em:
+  - `texture_handle_stats.csv`;
+  - `palette_handle_stats.csv`;
+  - `texture_palette_handle_stats.csv`;
+- qualquer fallback maior que zero deve ser analisado antes de considerar a
+  etapa concluida.
+
+Novos campos:
+- `indexed_palette_updates`
+- `indexed_palette_update_ms`
+- `total_indexed_palette_updates`
+- `total_indexed_palette_update_ms`
+- `worst_indexed_palette_update_ms`
+- `indexed_texture_rgba_fallbacks`
+- `total_indexed_texture_rgba_fallbacks`
+- `rgba_fallbacks` nos CSVs por handle

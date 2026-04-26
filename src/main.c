@@ -548,6 +548,9 @@ static int loop() {
                 .indexed_texture_updates = app_frame_timing.render_stats.indexed_texture_updates,
                 .indexed_texture_update_pixels = app_frame_timing.render_stats.indexed_texture_update_pixels,
                 .indexed_texture_update_ms = app_frame_timing.render_stats.indexed_texture_update_ms,
+                .indexed_palette_updates = app_frame_timing.render_stats.indexed_palette_updates,
+                .indexed_palette_update_ms = app_frame_timing.render_stats.indexed_palette_update_ms,
+                .indexed_texture_rgba_fallbacks = app_frame_timing.render_stats.indexed_texture_rgba_fallbacks,
                 .render_sort_ms = app_frame_timing.render_stats.render_sort_ms,
                 .render_geometry_ms = app_frame_timing.render_stats.render_geometry_ms,
             };

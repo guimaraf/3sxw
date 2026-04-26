@@ -51,6 +51,9 @@ typedef struct SDLGameRendererStats {
     int indexed_texture_updates;
     int indexed_texture_update_pixels;
     double indexed_texture_update_ms;
+    int indexed_palette_updates;
+    double indexed_palette_update_ms;
+    int indexed_texture_rgba_fallbacks;
     double render_sort_ms;
     double render_geometry_ms;
 } SDLGameRendererStats;

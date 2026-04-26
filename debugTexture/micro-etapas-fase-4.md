@@ -74,9 +74,32 @@ Teste esperado:
 
 ## 4.5 - Comparacao visual e regressao
 
-Escopo proposto:
+Escopo:
+- trocar o caminho experimental para tentar textura paletizada real do SDL3;
+- usar `SDL_SetTexturePalette` para trocar paleta sem converter textura inteira para RGBA;
+- enviar pixels indexados com `SDL_UpdateTexture` apenas quando os indices da textura mudarem;
+- manter fallback para o prototipo RGBA streaming se o renderer/driver recusar textura paletizada;
+- registrar metricas separadas de update de textura, update de paleta e fallback RGBA.
+- registrar `rgba_fallbacks` nos CSVs por texture handle, palette handle e combinacao texture/palette.
+
+Objetivo:
+- aproximar o renderer do modelo textura indexada + paleta separada;
+- transformar palette unlock durante gameplay em update pequeno de paleta;
+- eliminar conversao RGBA massiva nos casos em que o SDL aceitar textura paletizada.
+
+Teste esperado:
+- com `--debug-mode`: comportamento e logs da linha base continuam iguais;
+- com `--debug-mode --debug-indexed-texture-path`: `indexed_palette_updates` deve aparecer quando paletas mudarem;
+- `indexed_texture_update_pixels` deve representar upload de indices, nao conversao RGBA;
+- `indexed_texture_rgba_fallbacks` idealmente deve ficar em 0;
+- se `indexed_texture_rgba_fallbacks` for maior que 0, o renderer caiu para o caminho RGBA antigo para alguma textura.
+- se houver fallback, ordenar `texture_handle_stats.csv` e `texture_palette_handle_stats.csv` por `rgba_fallbacks`.
+
+Regressao visual obrigatoria:
 - testar menu, versus, treino, golpes, especiais, flashes, sombras, HUD e cenarios;
 - comparar logs do caminho padrao contra o caminho indexado.
 
-Objetivo:
-- decidir se o caminho experimental pode virar padrao, se deve ficar restrito, ou se deve ser descartado.
+Decisao esperada:
+- se a imagem ficar correta e `indexed_texture_rgba_fallbacks=0`, seguir para testes de gameplay pesado;
+- se a imagem ficar correta mas houver fallback, analisar quais texturas caem no fallback;
+- se houver corrupcao visual, manter o caminho atras da flag e corrigir antes de qualquer promocao.

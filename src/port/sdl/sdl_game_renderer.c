@@ -30,6 +30,12 @@ typedef enum TextureCacheInvalidationReason {
     TEXTURE_CACHE_INVALIDATION_RELEASE,
 } TextureCacheInvalidationReason;
 
+typedef enum TextureCacheMode {
+    TEXTURE_CACHE_MODE_DEFAULT,
+    TEXTURE_CACHE_MODE_RGBA_STREAMING,
+    TEXTURE_CACHE_MODE_PALETTIZED,
+} TextureCacheMode;
+
 typedef struct TexturePaletteHandleStats {
     Uint32 set_texture_calls;
     Uint32 cache_hits;
@@ -42,6 +48,7 @@ typedef struct TexturePaletteHandleStats {
     Uint32 invalidated_by_palette_unlock;
     Uint32 invalidated_by_texture_unlock;
     Uint32 invalidated_by_release;
+    Uint32 rgba_fallbacks;
 } TexturePaletteHandleStats;
 
 typedef struct TextureHandleStats {
@@ -57,6 +64,7 @@ typedef struct TextureHandleStats {
     Uint32 invalidated_by_palette_unlock;
     Uint32 invalidated_by_texture_unlock;
     Uint32 invalidated_by_release;
+    Uint32 rgba_fallbacks;
 } TextureHandleStats;
 
 typedef struct PaletteHandleStats {
@@ -72,6 +80,7 @@ typedef struct PaletteHandleStats {
     Uint32 invalidated_by_palette_unlock;
     Uint32 invalidated_by_texture_unlock;
     Uint32 invalidated_by_release;
+    Uint32 rgba_fallbacks;
 } PaletteHandleStats;
 
 SDL_Texture* cps3_canvas = NULL;
@@ -85,8 +94,9 @@ static SDL_Palette* palettes[FL_PALETTE_MAX] = { NULL };
 static SDL_Texture* textures[FL_PALETTE_MAX] = { NULL };
 static int texture_count = 0;
 static SDL_Texture* texture_cache[FL_TEXTURE_MAX][FL_PALETTE_MAX + 1] = { { NULL } };
-static bool texture_cache_uses_streaming[FL_TEXTURE_MAX][FL_PALETTE_MAX + 1] = { { false } };
-static bool texture_cache_streaming_dirty[FL_TEXTURE_MAX][FL_PALETTE_MAX + 1] = { { false } };
+static TextureCacheMode texture_cache_mode[FL_TEXTURE_MAX][FL_PALETTE_MAX + 1] = { { TEXTURE_CACHE_MODE_DEFAULT } };
+static bool texture_cache_pixels_dirty[FL_TEXTURE_MAX][FL_PALETTE_MAX + 1] = { { false } };
+static bool texture_cache_palette_dirty[FL_TEXTURE_MAX][FL_PALETTE_MAX + 1] = { { false } };
 static bool texture_cache_used_this_frame[FL_TEXTURE_MAX][FL_PALETTE_MAX + 1] = { { false } };
 static bool texture_cache_has_been_created[FL_TEXTURE_MAX][FL_PALETTE_MAX + 1] = { { false } };
 static TextureCacheInvalidationReason texture_cache_last_invalidation[FL_TEXTURE_MAX][FL_PALETTE_MAX + 1] = { { 0 } };
@@ -108,6 +118,9 @@ static int release_cache_invalidated_texture_count = 0;
 static int indexed_texture_update_count = 0;
 static int indexed_texture_update_pixel_count = 0;
 static double indexed_texture_update_ms = 0.0;
+static int indexed_palette_update_count = 0;
+static double indexed_palette_update_ms = 0.0;
+static int indexed_texture_rgba_fallback_count = 0;
 static bool debug_indexed_texture_path_enabled = false;
 static TextureCacheInvalidationReason active_texture_invalidation_reason = TEXTURE_CACHE_INVALIDATION_RELEASE;
 static TextureCacheInvalidationReason active_palette_invalidation_reason = TEXTURE_CACHE_INVALIDATION_RELEASE;
@@ -301,6 +314,9 @@ static void reset_texture_diagnostics() {
     indexed_texture_update_count = 0;
     indexed_texture_update_pixel_count = 0;
     indexed_texture_update_ms = 0.0;
+    indexed_palette_update_count = 0;
+    indexed_palette_update_ms = 0.0;
+    indexed_texture_rgba_fallback_count = 0;
 }
 
 static void record_texture_cache_invalidation(int texture_index, int palette_handle, TextureCacheInvalidationReason reason) {
@@ -490,21 +506,43 @@ static void record_texture_cache_miss(int texture_index, int palette_handle) {
     texture_cache_last_invalidation[texture_index][palette_handle] = TEXTURE_CACHE_INVALIDATION_NONE;
 }
 
+static void record_indexed_texture_rgba_fallback(int texture_index, int palette_handle) {
+    indexed_texture_rgba_fallback_count += 1;
+
+    if (!should_record_texture_diagnostics()) {
+        return;
+    }
+
+    TexturePaletteHandleStats* pair_stats = get_texture_palette_handle_stats(texture_index, palette_handle);
+    TextureHandleStats* texture_stats = &texture_handle_stats[texture_index + 1];
+    PaletteHandleStats* palette_stats = palette_handle > 0 ? &palette_handle_stats[palette_handle] : NULL;
+
+    texture_stats->rgba_fallbacks += 1;
+
+    if (palette_stats != NULL) {
+        palette_stats->rgba_fallbacks += 1;
+    }
+
+    if (pair_stats != NULL) {
+        pair_stats->rgba_fallbacks += 1;
+    }
+}
+
 static bool pair_stats_has_data(const TexturePaletteHandleStats* stats) {
     return stats->set_texture_calls > 0 || stats->cache_misses > 0 || stats->invalidated_by_palette_unlock > 0 ||
-           stats->invalidated_by_texture_unlock > 0 || stats->invalidated_by_release > 0;
+           stats->invalidated_by_texture_unlock > 0 || stats->invalidated_by_release > 0 || stats->rgba_fallbacks > 0;
 }
 
 static bool texture_stats_has_data(const TextureHandleStats* stats) {
     return stats->set_texture_calls > 0 || stats->cache_misses > 0 || stats->texture_unlocks > 0 ||
            stats->invalidated_by_palette_unlock > 0 || stats->invalidated_by_texture_unlock > 0 ||
-           stats->invalidated_by_release > 0;
+           stats->invalidated_by_release > 0 || stats->rgba_fallbacks > 0;
 }
 
 static bool palette_stats_has_data(const PaletteHandleStats* stats) {
     return stats->set_texture_calls > 0 || stats->cache_misses > 0 || stats->palette_unlocks > 0 ||
            stats->invalidated_by_palette_unlock > 0 || stats->invalidated_by_texture_unlock > 0 ||
-           stats->invalidated_by_release > 0;
+           stats->invalidated_by_release > 0 || stats->rgba_fallbacks > 0;
 }
 
 static bool ensure_indexed_texture_rgba_buffer(int width, int height) {
@@ -586,7 +624,46 @@ static bool update_indexed_streaming_texture(SDL_Texture* texture, const SDL_Sur
     return true;
 }
 
-static SDL_Texture* create_indexed_streaming_texture(const SDL_Surface* surface, const SDL_Palette* palette) {
+static bool update_indexed_texture_pixels(SDL_Texture* texture, const SDL_Surface* surface) {
+    if (texture == NULL || surface == NULL) {
+        return false;
+    }
+
+    const Uint64 update_start_ns = SDL_GetTicksNS();
+    const bool updated = SDL_UpdateTexture(texture, NULL, surface->pixels, surface->pitch);
+    const Uint64 update_end_ns = SDL_GetTicksNS();
+
+    if (!updated) {
+        SDL_Log("Failed to update indexed texture pixels: %s", SDL_GetError());
+        return false;
+    }
+
+    indexed_texture_update_count += 1;
+    indexed_texture_update_pixel_count += surface->w * surface->h;
+    indexed_texture_update_ms += elapsed_ms(update_start_ns, update_end_ns);
+    return true;
+}
+
+static bool update_indexed_texture_palette(SDL_Texture* texture, const SDL_Palette* palette) {
+    if (texture == NULL || palette == NULL) {
+        return false;
+    }
+
+    const Uint64 update_start_ns = SDL_GetTicksNS();
+    const bool updated = SDL_SetTexturePalette(texture, (SDL_Palette*)palette);
+    const Uint64 update_end_ns = SDL_GetTicksNS();
+
+    if (!updated) {
+        SDL_Log("Failed to update indexed texture palette: %s", SDL_GetError());
+        return false;
+    }
+
+    indexed_palette_update_count += 1;
+    indexed_palette_update_ms += elapsed_ms(update_start_ns, update_end_ns);
+    return true;
+}
+
+static SDL_Texture* create_indexed_rgba_streaming_texture(const SDL_Surface* surface, const SDL_Palette* palette) {
     SDL_Texture* texture =
         SDL_CreateTexture(_renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, surface->w, surface->h);
 
@@ -606,11 +683,53 @@ static SDL_Texture* create_indexed_streaming_texture(const SDL_Surface* surface,
     return texture;
 }
 
-static bool should_use_indexed_streaming_texture(const SDL_Surface* surface, const SDL_Palette* palette) {
+static SDL_Texture* create_indexed_palettized_texture(const SDL_Surface* surface, const SDL_Palette* palette) {
+    SDL_Texture* texture =
+        SDL_CreateTexture(_renderer, surface->format, SDL_TEXTUREACCESS_STATIC, surface->w, surface->h);
+
+    if (texture == NULL) {
+        SDL_Log("Failed to create indexed palettized texture: %s", SDL_GetError());
+        return NULL;
+    }
+
+    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+
+    if (!update_indexed_texture_palette(texture, palette) || !update_indexed_texture_pixels(texture, surface)) {
+        SDL_DestroyTexture(texture);
+        return NULL;
+    }
+
+    return texture;
+}
+
+static SDL_Texture* create_experimental_indexed_texture(int texture_index,
+                                                        int palette_handle,
+                                                        const SDL_Surface* surface,
+                                                        const SDL_Palette* palette,
+                                                        TextureCacheMode* texture_mode) {
+    SDL_Texture* texture = create_indexed_palettized_texture(surface, palette);
+
+    if (texture != NULL) {
+        *texture_mode = TEXTURE_CACHE_MODE_PALETTIZED;
+        return texture;
+    }
+
+    record_indexed_texture_rgba_fallback(texture_index, palette_handle);
+    texture = create_indexed_rgba_streaming_texture(surface, palette);
+
+    if (texture != NULL) {
+        *texture_mode = TEXTURE_CACHE_MODE_RGBA_STREAMING;
+    }
+
+    return texture;
+}
+
+static bool should_use_experimental_indexed_texture(const SDL_Surface* surface, const SDL_Palette* palette) {
     return should_record_texture_diagnostics() && is_indexed_surface(surface) && palette != NULL;
 }
 
-static void mark_streaming_textures_dirty_for_palette(int palette_handle) {
+static void mark_experimental_textures_dirty_for_palette(int palette_handle) {
     if (!should_record_texture_diagnostics() || palette_handle <= 0 || palette_handle >= FL_PALETTE_MAX) {
         return;
     }
@@ -618,15 +737,19 @@ static void mark_streaming_textures_dirty_for_palette(int palette_handle) {
     for (int texture_index = 0; texture_index < FL_TEXTURE_MAX; texture_index++) {
         SDL_Texture* texture = texture_cache[texture_index][palette_handle];
 
-        if (texture == NULL || !texture_cache_uses_streaming[texture_index][palette_handle]) {
+        if (texture == NULL || texture_cache_mode[texture_index][palette_handle] == TEXTURE_CACHE_MODE_DEFAULT) {
             continue;
         }
 
-        texture_cache_streaming_dirty[texture_index][palette_handle] = true;
+        if (texture_cache_mode[texture_index][palette_handle] == TEXTURE_CACHE_MODE_PALETTIZED) {
+            texture_cache_palette_dirty[texture_index][palette_handle] = true;
+        } else {
+            texture_cache_pixels_dirty[texture_index][palette_handle] = true;
+        }
     }
 }
 
-static void mark_streaming_textures_dirty_for_texture(int texture_handle) {
+static void mark_experimental_textures_dirty_for_texture(int texture_handle) {
     if (!should_record_texture_diagnostics() || texture_handle <= 0 || texture_handle >= FL_TEXTURE_MAX) {
         return;
     }
@@ -636,12 +759,70 @@ static void mark_streaming_textures_dirty_for_texture(int texture_handle) {
     for (int palette_handle = 1; palette_handle < FL_PALETTE_MAX + 1; palette_handle++) {
         SDL_Texture* texture = texture_cache[texture_index][palette_handle];
 
-        if (texture == NULL || !texture_cache_uses_streaming[texture_index][palette_handle]) {
+        if (texture == NULL || texture_cache_mode[texture_index][palette_handle] == TEXTURE_CACHE_MODE_DEFAULT) {
             continue;
         }
 
-        texture_cache_streaming_dirty[texture_index][palette_handle] = true;
+        texture_cache_pixels_dirty[texture_index][palette_handle] = true;
     }
+}
+
+static void reset_texture_cache_entry(int texture_index, int palette_handle) {
+    texture_cache[texture_index][palette_handle] = NULL;
+    texture_cache_mode[texture_index][palette_handle] = TEXTURE_CACHE_MODE_DEFAULT;
+    texture_cache_pixels_dirty[texture_index][palette_handle] = false;
+    texture_cache_palette_dirty[texture_index][palette_handle] = false;
+}
+
+static bool update_cached_experimental_indexed_texture(SDL_Texture* texture,
+                                                       const SDL_Surface* surface,
+                                                       const SDL_Palette* palette,
+                                                       int texture_index,
+                                                       int palette_handle) {
+    const TextureCacheMode mode = texture_cache_mode[texture_index][palette_handle];
+
+    if (mode == TEXTURE_CACHE_MODE_PALETTIZED) {
+        if (texture_cache_pixels_dirty[texture_index][palette_handle] && !update_indexed_texture_pixels(texture, surface)) {
+            return false;
+        }
+
+        if (texture_cache_palette_dirty[texture_index][palette_handle] &&
+            !update_indexed_texture_palette(texture, palette)) {
+            return false;
+        }
+    } else if (mode == TEXTURE_CACHE_MODE_RGBA_STREAMING) {
+        if ((texture_cache_pixels_dirty[texture_index][palette_handle] ||
+             texture_cache_palette_dirty[texture_index][palette_handle]) &&
+            !update_indexed_streaming_texture(texture, surface, palette)) {
+            return false;
+        }
+    }
+
+    texture_cache_pixels_dirty[texture_index][palette_handle] = false;
+    texture_cache_palette_dirty[texture_index][palette_handle] = false;
+    return true;
+}
+
+static SDL_Texture* create_texture_for_cache(const SDL_Surface* surface,
+                                             int texture_index,
+                                             int palette_handle,
+                                             const SDL_Palette* palette,
+                                             TextureCacheMode* texture_mode) {
+    SDL_Texture* texture = NULL;
+    *texture_mode = TEXTURE_CACHE_MODE_DEFAULT;
+
+    if (should_use_experimental_indexed_texture(surface, palette)) {
+        texture = create_experimental_indexed_texture(texture_index, palette_handle, surface, palette, texture_mode);
+    } else {
+        texture = SDL_CreateTextureFromSurface(_renderer, surface);
+    }
+
+    if (texture != NULL && *texture_mode == TEXTURE_CACHE_MODE_DEFAULT) {
+        SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+        SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+    }
+
+    return texture;
 }
 
 // Colors
@@ -722,7 +903,8 @@ void SDLGameRenderer_WriteDebugTextureHandleStats() {
     DebugLog_Write("texture_palette_handle_stats.csv",
                    "texture_handle,palette_handle,set_texture_calls,cache_hits,cache_misses,miss_first_use,"
                    "miss_after_palette_unlock,miss_after_texture_unlock,miss_after_release,miss_unknown,"
-                   "invalidated_by_palette_unlock,invalidated_by_texture_unlock,invalidated_by_release\n");
+                   "invalidated_by_palette_unlock,invalidated_by_texture_unlock,invalidated_by_release,"
+                   "rgba_fallbacks\n");
 
     for (int texture_index = 0; texture_index < FL_TEXTURE_MAX; texture_index++) {
         for (int palette_handle = 0; palette_handle < FL_PALETTE_MAX + 1; palette_handle++) {
@@ -734,7 +916,7 @@ void SDLGameRenderer_WriteDebugTextureHandleStats() {
             }
 
             DebugLog_Printf("texture_palette_handle_stats.csv",
-                            "%d,%d,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
+                            "%d,%d,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
                             texture_index + 1,
                             palette_handle,
                             stats->set_texture_calls,
@@ -747,7 +929,8 @@ void SDLGameRenderer_WriteDebugTextureHandleStats() {
                             stats->miss_unknown,
                             stats->invalidated_by_palette_unlock,
                             stats->invalidated_by_texture_unlock,
-                            stats->invalidated_by_release);
+                            stats->invalidated_by_release,
+                            stats->rgba_fallbacks);
         }
     }
 
@@ -755,7 +938,7 @@ void SDLGameRenderer_WriteDebugTextureHandleStats() {
                    "texture_handle,set_texture_calls,cache_hits,cache_misses,miss_first_use,"
                    "miss_after_palette_unlock,miss_after_texture_unlock,miss_after_release,miss_unknown,"
                    "texture_unlocks,invalidated_by_palette_unlock,invalidated_by_texture_unlock,"
-                   "invalidated_by_release\n");
+                   "invalidated_by_release,rgba_fallbacks\n");
 
     for (int texture_handle = 1; texture_handle < FL_TEXTURE_MAX + 1; texture_handle++) {
         const TextureHandleStats* stats = &texture_handle_stats[texture_handle];
@@ -765,7 +948,7 @@ void SDLGameRenderer_WriteDebugTextureHandleStats() {
         }
 
         DebugLog_Printf("texture_handle_stats.csv",
-                        "%d,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
+                        "%d,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
                         texture_handle,
                         stats->set_texture_calls,
                         stats->cache_hits,
@@ -778,14 +961,15 @@ void SDLGameRenderer_WriteDebugTextureHandleStats() {
                         stats->texture_unlocks,
                         stats->invalidated_by_palette_unlock,
                         stats->invalidated_by_texture_unlock,
-                        stats->invalidated_by_release);
+                        stats->invalidated_by_release,
+                        stats->rgba_fallbacks);
     }
 
     DebugLog_Write("palette_handle_stats.csv",
                    "palette_handle,set_texture_calls,cache_hits,cache_misses,miss_first_use,"
                    "miss_after_palette_unlock,miss_after_texture_unlock,miss_after_release,miss_unknown,"
                    "palette_unlocks,invalidated_by_palette_unlock,invalidated_by_texture_unlock,"
-                   "invalidated_by_release\n");
+                   "invalidated_by_release,rgba_fallbacks\n");
 
     for (int palette_handle = 1; palette_handle < FL_PALETTE_MAX + 1; palette_handle++) {
         const PaletteHandleStats* stats = &palette_handle_stats[palette_handle];
@@ -795,7 +979,7 @@ void SDLGameRenderer_WriteDebugTextureHandleStats() {
         }
 
         DebugLog_Printf("palette_handle_stats.csv",
-                        "%d,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
+                        "%d,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
                         palette_handle,
                         stats->set_texture_calls,
                         stats->cache_hits,
@@ -808,7 +992,8 @@ void SDLGameRenderer_WriteDebugTextureHandleStats() {
                         stats->palette_unlocks,
                         stats->invalidated_by_palette_unlock,
                         stats->invalidated_by_texture_unlock,
-                        stats->invalidated_by_release);
+                        stats->invalidated_by_release,
+                        stats->rgba_fallbacks);
     }
 
     SDL_free(texture_palette_handle_stats);
@@ -861,6 +1046,9 @@ void SDLGameRenderer_RenderFrame(SDLGameRendererStats* stats) {
         stats->indexed_texture_updates = indexed_texture_update_count;
         stats->indexed_texture_update_pixels = indexed_texture_update_pixel_count;
         stats->indexed_texture_update_ms = indexed_texture_update_ms;
+        stats->indexed_palette_updates = indexed_palette_update_count;
+        stats->indexed_palette_update_ms = indexed_palette_update_ms;
+        stats->indexed_texture_rgba_fallbacks = indexed_texture_rgba_fallback_count;
     }
 
     const Uint64 sort_start_ns = stats != NULL ? SDL_GetTicksNS() : 0;
@@ -928,7 +1116,7 @@ void SDLGameRenderer_UnlockPalette(unsigned int ph) {
         SDLGameRenderer_DestroyPalette(palette_handle);
         active_palette_invalidation_reason = TEXTURE_CACHE_INVALIDATION_RELEASE;
         SDLGameRenderer_CreatePalette(ph << 16);
-        mark_streaming_textures_dirty_for_palette(palette_handle);
+        mark_experimental_textures_dirty_for_palette(palette_handle);
     }
 }
 
@@ -946,7 +1134,7 @@ void SDLGameRenderer_UnlockTexture(unsigned int th) {
         SDLGameRenderer_DestroyTexture(texture_handle);
         active_texture_invalidation_reason = TEXTURE_CACHE_INVALIDATION_RELEASE;
         SDLGameRenderer_CreateTexture(th);
-        mark_streaming_textures_dirty_for_texture(texture_handle);
+        mark_experimental_textures_dirty_for_texture(texture_handle);
     }
 }
 
@@ -1001,14 +1189,16 @@ void SDLGameRenderer_DestroyTexture(unsigned int texture_handle) {
         record_texture_cache_invalidation(texture_index, i, active_texture_invalidation_reason);
 
         if (active_texture_invalidation_reason == TEXTURE_CACHE_INVALIDATION_TEXTURE_UNLOCK &&
-            texture_cache_uses_streaming[texture_index][i] && !texture_cache_used_this_frame[texture_index][i]) {
+            texture_cache_mode[texture_index][i] != TEXTURE_CACHE_MODE_DEFAULT &&
+            !texture_cache_used_this_frame[texture_index][i]) {
             continue;
         }
 
         push_texture_to_destroy(*texture_p);
         *texture_p = NULL;
-        texture_cache_uses_streaming[texture_index][i] = false;
-        texture_cache_streaming_dirty[texture_index][i] = false;
+        texture_cache_mode[texture_index][i] = TEXTURE_CACHE_MODE_DEFAULT;
+        texture_cache_pixels_dirty[texture_index][i] = false;
+        texture_cache_palette_dirty[texture_index][i] = false;
     }
 
     SDL_DestroySurface(surfaces[texture_index]);
@@ -1081,14 +1271,16 @@ void SDLGameRenderer_DestroyPalette(unsigned int palette_handle) {
         record_texture_cache_invalidation(i, palette_handle, active_palette_invalidation_reason);
 
         if (active_palette_invalidation_reason == TEXTURE_CACHE_INVALIDATION_PALETTE_UNLOCK &&
-            texture_cache_uses_streaming[i][palette_handle] && !texture_cache_used_this_frame[i][palette_handle]) {
+            texture_cache_mode[i][palette_handle] != TEXTURE_CACHE_MODE_DEFAULT &&
+            !texture_cache_used_this_frame[i][palette_handle]) {
             continue;
         }
 
         push_texture_to_destroy(*texture_p);
         *texture_p = NULL;
-        texture_cache_uses_streaming[i][palette_handle] = false;
-        texture_cache_streaming_dirty[i][palette_handle] = false;
+        texture_cache_mode[i][palette_handle] = TEXTURE_CACHE_MODE_DEFAULT;
+        texture_cache_pixels_dirty[i][palette_handle] = false;
+        texture_cache_palette_dirty[i][palette_handle] = false;
     }
 
     SDL_DestroyPalette(palettes[palette_index]);
@@ -1097,6 +1289,7 @@ void SDLGameRenderer_DestroyPalette(unsigned int palette_handle) {
 
 void SDLGameRenderer_SetTexture(unsigned int th) {
     const int texture_handle = LO_16_BITS(th);
+    const int texture_index = texture_handle - 1;
     const SDL_Surface* surface = surfaces[texture_handle - 1];
     const int palette_handle = HI_16_BITS(th);
     const SDL_Palette* palette = palette_handle != 0 ? palettes[palette_handle - 1] : NULL;
@@ -1110,67 +1303,52 @@ void SDLGameRenderer_SetTexture(unsigned int th) {
     }
 
     SDL_Texture* texture = NULL;
-    const SDL_Texture* cached_texture = texture_cache[texture_handle - 1][palette_handle];
+    const SDL_Texture* cached_texture = texture_cache[texture_index][palette_handle];
 
     if (cached_texture != NULL) {
         texture = cached_texture;
-        record_texture_cache_access(texture_handle - 1, palette_handle, true);
+        record_texture_cache_access(texture_index, palette_handle, true);
 
-        if (texture_cache_uses_streaming[texture_handle - 1][palette_handle] &&
-            texture_cache_streaming_dirty[texture_handle - 1][palette_handle]) {
-            if (!update_indexed_streaming_texture(texture, surface, palette)) {
-                push_texture_to_destroy(texture);
-                texture = NULL;
-                texture_cache[texture_handle - 1][palette_handle] = NULL;
-                texture_cache_uses_streaming[texture_handle - 1][palette_handle] = false;
-            } else {
-                texture_cache_streaming_dirty[texture_handle - 1][palette_handle] = false;
-            }
+        if (texture_cache_mode[texture_index][palette_handle] != TEXTURE_CACHE_MODE_DEFAULT &&
+            !update_cached_experimental_indexed_texture(texture, surface, palette, texture_index, palette_handle)) {
+            push_texture_to_destroy(texture);
+            texture = NULL;
+            reset_texture_cache_entry(texture_index, palette_handle);
         }
     } else {
-        record_texture_cache_access(texture_handle - 1, palette_handle, false);
-        texture = should_use_indexed_streaming_texture(surface, palette) ? create_indexed_streaming_texture(surface, palette)
-                                                                         : SDL_CreateTextureFromSurface(_renderer, surface);
+        TextureCacheMode texture_mode = TEXTURE_CACHE_MODE_DEFAULT;
+        record_texture_cache_access(texture_index, palette_handle, false);
+        texture = create_texture_for_cache(surface, texture_index, palette_handle, palette, &texture_mode);
 
         if (texture == NULL) {
             fatal_error("Failed to create texture");
         }
 
-        if (!should_use_indexed_streaming_texture(surface, palette)) {
-            SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
-            SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-        }
+        texture_cache[texture_index][palette_handle] = texture;
+        texture_cache_mode[texture_index][palette_handle] = texture_mode;
+        texture_cache_pixels_dirty[texture_index][palette_handle] = false;
+        texture_cache_palette_dirty[texture_index][palette_handle] = false;
 
-        texture_cache[texture_handle - 1][palette_handle] = texture;
-        texture_cache_uses_streaming[texture_handle - 1][palette_handle] =
-            should_use_indexed_streaming_texture(surface, palette);
-        texture_cache_streaming_dirty[texture_handle - 1][palette_handle] = false;
-
-        record_texture_cache_miss(texture_handle - 1, palette_handle);
+        record_texture_cache_miss(texture_index, palette_handle);
     }
 
     if (texture == NULL) {
-        record_texture_cache_access(texture_handle - 1, palette_handle, false);
-        texture = should_use_indexed_streaming_texture(surface, palette) ? create_indexed_streaming_texture(surface, palette)
-                                                                         : SDL_CreateTextureFromSurface(_renderer, surface);
+        TextureCacheMode texture_mode = TEXTURE_CACHE_MODE_DEFAULT;
+        record_texture_cache_access(texture_index, palette_handle, false);
+        texture = create_texture_for_cache(surface, texture_index, palette_handle, palette, &texture_mode);
 
         if (texture == NULL) {
             fatal_error("Failed to recreate dirty texture");
         }
 
-        if (!should_use_indexed_streaming_texture(surface, palette)) {
-            SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
-            SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-        }
-
-        texture_cache[texture_handle - 1][palette_handle] = texture;
-        texture_cache_uses_streaming[texture_handle - 1][palette_handle] =
-            should_use_indexed_streaming_texture(surface, palette);
-        texture_cache_streaming_dirty[texture_handle - 1][palette_handle] = false;
-        record_texture_cache_miss(texture_handle - 1, palette_handle);
+        texture_cache[texture_index][palette_handle] = texture;
+        texture_cache_mode[texture_index][palette_handle] = texture_mode;
+        texture_cache_pixels_dirty[texture_index][palette_handle] = false;
+        texture_cache_palette_dirty[texture_index][palette_handle] = false;
+        record_texture_cache_miss(texture_index, palette_handle);
     }
 
-    texture_cache_used_this_frame[texture_handle - 1][palette_handle] = true;
+    texture_cache_used_this_frame[texture_index][palette_handle] = true;
     push_texture(texture);
 }
 

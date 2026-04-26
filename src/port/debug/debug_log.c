@@ -40,6 +40,11 @@ static Uint64 total_indexed_texture_update_pixels = 0;
 static double total_indexed_texture_update_ms = 0.0;
 static double worst_indexed_texture_update_ms = 0.0;
 static Uint64 worst_indexed_texture_update_frame = 0;
+static Uint64 total_indexed_palette_updates = 0;
+static double total_indexed_palette_update_ms = 0.0;
+static double worst_indexed_palette_update_ms = 0.0;
+static Uint64 worst_indexed_palette_update_frame = 0;
+static Uint64 total_indexed_texture_rgba_fallbacks = 0;
 static double worst_render_sort_ms = 0.0;
 static double worst_render_geometry_ms = 0.0;
 static Uint64 worst_render_sort_frame = 0;
@@ -209,6 +214,13 @@ static void write_summary_file() {
     fprintf(file,
             "worst_indexed_texture_update_frame=%llu\n",
             (unsigned long long)worst_indexed_texture_update_frame);
+    fprintf(file, "total_indexed_palette_updates=%llu\n", (unsigned long long)total_indexed_palette_updates);
+    fprintf(file, "total_indexed_palette_update_ms=%.3f\n", total_indexed_palette_update_ms);
+    fprintf(file, "worst_indexed_palette_update_ms=%.3f\n", worst_indexed_palette_update_ms);
+    fprintf(file,
+            "worst_indexed_palette_update_frame=%llu\n",
+            (unsigned long long)worst_indexed_palette_update_frame);
+    fprintf(file, "total_indexed_texture_rgba_fallbacks=%llu\n", (unsigned long long)total_indexed_texture_rgba_fallbacks);
     fprintf(file, "worst_render_sort_ms=%.3f\n", worst_render_sort_ms);
     fprintf(file, "worst_render_sort_frame=%llu\n", (unsigned long long)worst_render_sort_frame);
     fprintf(file, "worst_render_geometry_ms=%.3f\n", worst_render_geometry_ms);
@@ -262,6 +274,11 @@ static void reset_frame_timing_stats() {
     total_indexed_texture_update_ms = 0.0;
     worst_indexed_texture_update_ms = 0.0;
     worst_indexed_texture_update_frame = 0;
+    total_indexed_palette_updates = 0;
+    total_indexed_palette_update_ms = 0.0;
+    worst_indexed_palette_update_ms = 0.0;
+    worst_indexed_palette_update_frame = 0;
+    total_indexed_texture_rgba_fallbacks = 0;
     worst_render_sort_ms = 0.0;
     worst_render_geometry_ms = 0.0;
     worst_render_sort_frame = 0;
@@ -291,7 +308,8 @@ static void open_render_stats_file() {
             "texture_cache_misses_after_release,texture_cache_misses_unknown,palette_unlocks,texture_unlocks,"
             "palette_cache_invalidated_textures,texture_cache_invalidated_textures,"
             "release_cache_invalidated_textures,indexed_texture_updates,indexed_texture_update_pixels,"
-            "indexed_texture_update_ms,render_sort_ms,render_geometry_ms\n");
+            "indexed_texture_update_ms,indexed_palette_updates,indexed_palette_update_ms,"
+            "indexed_texture_rgba_fallbacks,render_sort_ms,render_geometry_ms\n");
 }
 
 static void open_event_log_file() {
@@ -502,7 +520,7 @@ void DebugLog_RecordRenderStats(const DebugRenderStats* stats) {
 
     if (render_stats_file != NULL) {
         fprintf(render_stats_file,
-                "%llu,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%.3f,%.3f,%.3f\n",
+                "%llu,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%.3f,%d,%.3f,%d,%.3f,%.3f\n",
                 (unsigned long long)stats->frame,
                 stats->render_tasks,
                 stats->geometry_calls,
@@ -520,6 +538,9 @@ void DebugLog_RecordRenderStats(const DebugRenderStats* stats) {
                 stats->indexed_texture_updates,
                 stats->indexed_texture_update_pixels,
                 stats->indexed_texture_update_ms,
+                stats->indexed_palette_updates,
+                stats->indexed_palette_update_ms,
+                stats->indexed_texture_rgba_fallbacks,
                 stats->render_sort_ms,
                 stats->render_geometry_ms);
 
@@ -613,6 +634,22 @@ void DebugLog_RecordRenderStats(const DebugRenderStats* stats) {
     if (stats->indexed_texture_update_ms > worst_indexed_texture_update_ms) {
         worst_indexed_texture_update_ms = stats->indexed_texture_update_ms;
         worst_indexed_texture_update_frame = stats->frame;
+    }
+
+    if (stats->indexed_palette_updates > 0) {
+        total_indexed_palette_updates += (Uint64)stats->indexed_palette_updates;
+        total_indexed_palette_update_ms += stats->indexed_palette_update_ms;
+        write_event(stats->frame, "indexed_palette_updates", "%d", stats->indexed_palette_updates);
+    }
+
+    if (stats->indexed_palette_update_ms > worst_indexed_palette_update_ms) {
+        worst_indexed_palette_update_ms = stats->indexed_palette_update_ms;
+        worst_indexed_palette_update_frame = stats->frame;
+    }
+
+    if (stats->indexed_texture_rgba_fallbacks > 0) {
+        total_indexed_texture_rgba_fallbacks += (Uint64)stats->indexed_texture_rgba_fallbacks;
+        write_event(stats->frame, "indexed_texture_rgba_fallbacks", "%d", stats->indexed_texture_rgba_fallbacks);
     }
 
     if (stats->render_sort_ms > worst_render_sort_ms) {

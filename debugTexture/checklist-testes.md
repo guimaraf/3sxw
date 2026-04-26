@@ -78,3 +78,31 @@
 3. Teste visual obrigatorio.
    - Verificar menu, selecao, round, HUD, sombras, hits, blocks, especiais e transicoes.
    - Se houver cor errada, sprite piscando, textura antiga ou frame visualmente incorreto, parar e analisar antes de ampliar o prototipo.
+
+## Micro etapa 4.5
+
+1. Rodar sem flags.
+   - Esperado: nenhuma pasta/arquivo de debug e comportamento igual ao caminho normal.
+
+2. Rodar com `--debug-mode`.
+   - Esperado: linha base continua igual.
+   - Esperado: campos do caminho indexado ficam zerados.
+
+3. Rodar com `--debug-mode --debug-indexed-texture-path`.
+   - Esperado: jogo abre e renderiza corretamente.
+   - Esperado: `total_indexed_palette_updates` aparece no `summary.txt`.
+   - Esperado: `total_indexed_texture_rgba_fallbacks=0` se o SDL/driver aceitou textura paletizada.
+   - Esperado: `total_indexed_texture_update_pixels` representa uploads de indices, nao conversao RGBA massiva.
+   - Se houver fallback: ordenar `texture_handle_stats.csv`, `palette_handle_stats.csv` e `texture_palette_handle_stats.csv` por `rgba_fallbacks`.
+
+4. Teste de gameplay real.
+   - Jogar ao menos um round completo no Arcade.
+   - Fazer blocks, hits, especiais, super arts e transicao de round.
+   - Fechar pelo menu.
+   - Comparar contra uma sessao `--debug-mode` feita com o mesmo roteiro.
+
+5. Bloqueios para encerrar a etapa.
+   - Qualquer corrupcao visual em personagem, HUD, sombra, efeito ou tela de transicao.
+   - `total_indexed_texture_rgba_fallbacks` maior que zero sem entender quais texturas cairam no fallback.
+   - `worst_frame_ms`, `p95_frame_ms` ou `p99_frame_ms` piores que a linha base de forma relevante.
+   - Sensacao de input pior, mesmo que os numeros parecam bons.
