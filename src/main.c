@@ -183,6 +183,7 @@ static void initialize_game() {
 
 static void cleanup() {
     AFS_Finish();
+    SDLGameRenderer_WriteDebugTextureHandleStats();
     DebugLog_Shutdown();
     SDL_free(main_command_line);
     main_command_line = NULL;
@@ -426,7 +427,8 @@ static int loop() {
         switch (phase) {
         case MAIN_PHASE_INIT:
             SDLApp_PreInit();
-            SDLGameRenderer_SetDebugIndexedTexturePathEnabled(configuration.debug_runtime.indexed_texture_path_enabled);
+            SDLGameRenderer_SetDebugIndexedTexturePathEnabled(configuration.debug_runtime.enabled &&
+                                                              configuration.debug_runtime.indexed_texture_path_enabled);
             DebugLog_Init(configuration.debug_runtime.enabled, main_argc, main_command_line);
             DebugLog_PrintSession("debug_indexed_texture_path=%d\n",
                                   configuration.debug_runtime.indexed_texture_path_enabled);

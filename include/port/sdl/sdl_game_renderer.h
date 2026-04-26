@@ -56,6 +56,7 @@ extern SDL_Texture* cps3_canvas;
 
 void SDLGameRenderer_Init(SDL_Renderer* renderer);
 void SDLGameRenderer_SetDebugIndexedTexturePathEnabled(bool enabled);
+void SDLGameRenderer_WriteDebugTextureHandleStats();
 void SDLGameRenderer_BeginFrame();
 void SDLGameRenderer_RenderFrame(SDLGameRendererStats* stats);
 void SDLGameRenderer_EndFrame();

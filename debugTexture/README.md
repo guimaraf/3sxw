@@ -11,6 +11,7 @@ Objetivo:
 Estado atual:
 - micro etapa 4.1 criou a flag experimental e a documentacao;
 - micro etapa 4.2 separa as causas dos misses quando a flag experimental esta ligada;
+- micro etapa 4.3 gera CSVs agregados por texture handle, palette handle e combinacao texture/palette;
 - a flag ainda nao muda o algoritmo de renderizacao;
 - o caminho padrao continua usando textura SDL RGBA criada a partir da surface paletizada.
 

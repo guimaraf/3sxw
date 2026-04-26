@@ -41,3 +41,26 @@ Campos adicionados:
 - `release_cache_invalidated_textures`
 
 Essa etapa ainda nao altera o caminho visual. Ela apenas explica por que uma textura SDL precisou ser recriada.
+
+## Micro etapa 4.3
+
+A coleta por handle tambem e ativada somente com `--debug-indexed-texture-path`.
+
+Arquivos:
+- `texture_handle_stats.csv`: agregados por texture handle.
+- `palette_handle_stats.csv`: agregados por palette handle.
+- `texture_palette_handle_stats.csv`: agregados por combinacao texture handle + palette handle.
+
+Campos principais:
+- `set_texture_calls`: quantas vezes a combinacao foi solicitada para render;
+- `cache_hits`: quantas vezes a textura SDL ja estava pronta;
+- `cache_misses`: quantas vezes a textura SDL precisou ser criada;
+- `miss_after_texture_unlock`: recriacao apos `SDLGameRenderer_UnlockTexture`;
+- `miss_after_palette_unlock`: recriacao apos `SDLGameRenderer_UnlockPalette`;
+- `invalidated_by_texture_unlock`: texturas SDL descartadas por unlock de textura;
+- `invalidated_by_palette_unlock`: texturas SDL descartadas por unlock de paleta.
+
+Interpretacao:
+- poucos handles com muitos misses indicam alvo bom para prototipo;
+- muitos handles com poucos misses indicam churn distribuido, mais arriscado de otimizar pontualmente;
+- muitos `miss_after_texture_unlock` reforcam que o problema vem de atualizacao de dados de textura, nao de troca de paleta.

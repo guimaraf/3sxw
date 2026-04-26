@@ -46,3 +46,20 @@
      - `total_texture_cache_misses_after_texture_unlock`;
      - `total_texture_cache_misses_after_release`;
      - `total_texture_cache_misses_unknown`.
+
+## Micro etapa 4.3
+
+1. Rodar com `--debug-mode`.
+   - Esperado: `texture_handle_stats.csv`, `palette_handle_stats.csv` e `texture_palette_handle_stats.csv` nao sao criados.
+
+2. Rodar com `--debug-mode --debug-indexed-texture-path`.
+   - Esperado: os tres CSVs por handle sao criados ao fechar o jogo.
+   - Esperado: `texture_handle_stats.csv` mostra quais texturas concentram unlocks, misses e invalidacoes.
+   - Esperado: `palette_handle_stats.csv` mostra quais paletas participam dos misses e invalidacoes.
+   - Esperado: `texture_palette_handle_stats.csv` mostra as combinacoes textura/paleta que mais recriam `SDL_Texture`.
+
+3. Teste de gameplay para esta etapa.
+   - Entrar no treino.
+   - Fazer golpes normais, especiais, super arts, blocks e hits.
+   - Fechar pelo menu.
+   - Ordenar os CSVs por `cache_misses`, `miss_after_texture_unlock` e `invalidated_by_texture_unlock`.

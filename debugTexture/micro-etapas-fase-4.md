@@ -34,13 +34,23 @@ Teste esperado:
 
 ## 4.3 - Mapa de uso por handle
 
-Escopo proposto:
-- registrar handles mais afetados;
-- evitar log gigante por frame, usando agregados;
-- identificar se o churn vem de poucos handles ou de muitos handles.
+Escopo:
+- registrar handles mais afetados em CSVs agregados;
+- evitar log gigante por frame;
+- identificar se o churn vem de poucas texturas, poucas paletas ou muitas combinacoes textura/paleta.
 
 Objetivo:
 - escolher um alvo pequeno para prototipo.
+
+Arquivos gerados com `--debug-mode --debug-indexed-texture-path`:
+- `texture_handle_stats.csv`
+- `palette_handle_stats.csv`
+- `texture_palette_handle_stats.csv`
+
+Teste esperado:
+- com `--debug-mode`: esses CSVs nao devem ser criados;
+- com `--debug-mode --debug-indexed-texture-path`: os CSVs devem ser criados ao fechar o jogo;
+- os maiores valores de `cache_misses`, `miss_after_texture_unlock` e `invalidated_by_texture_unlock` indicam os handles candidatos para o prototipo.
 
 ## 4.4 - Prototipo isolado de caminho indexado
 
