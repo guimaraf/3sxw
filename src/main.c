@@ -412,14 +412,22 @@ static bool sdl_poll_helper() {
     return continue_running;
 }
 
+static double elapsed_ms(Uint64 start_ns, Uint64 end_ns) {
+    return (double)(end_ns - start_ns) / 1e6;
+}
+
 static int loop() {
     bool is_running = true;
+    Uint64 debug_frame = 0;
+    const double late_frame_threshold_ms = (1000.0 / TARGET_FPS) + 1.0;
 
     while (is_running) {
         switch (phase) {
         case MAIN_PHASE_INIT:
             SDLApp_PreInit();
             DebugLog_Init(configuration.debug_runtime.enabled, main_argc, main_command_line);
+            DebugLog_PrintSession("target_frame_ms=%.3f\n", 1000.0 / TARGET_FPS);
+            DebugLog_PrintSession("late_frame_threshold_ms=%.3f\n", late_frame_threshold_ms);
 
             if (Resources_Check()) {
                 initialize_game();
@@ -449,16 +457,68 @@ static int loop() {
             break;
 
         case MAIN_PHASE_INITIALIZED:
+            if (!DebugLog_IsEnabled()) {
+                is_running = SDLApp_PollEvents();
+
+                if (!is_running) {
+                    break;
+                }
+
+                SDLApp_BeginFrame();
+                game_step_0();
+                SDLApp_EndFrame(NULL);
+                game_step_1();
+                break;
+            }
+
+            const Uint64 frame_start_ns = SDL_GetTicksNS();
+
+            const Uint64 poll_start_ns = frame_start_ns;
             is_running = SDLApp_PollEvents();
+            const Uint64 poll_end_ns = SDL_GetTicksNS();
 
             if (!is_running) {
                 break;
             }
 
+            const Uint64 begin_start_ns = poll_end_ns;
             SDLApp_BeginFrame();
+            const Uint64 begin_end_ns = SDL_GetTicksNS();
+
+            const Uint64 game0_start_ns = begin_end_ns;
             game_step_0();
-            SDLApp_EndFrame();
+            const Uint64 game0_end_ns = SDL_GetTicksNS();
+
+            SDLAppFrameTiming app_frame_timing = { 0 };
+            const Uint64 end_start_ns = game0_end_ns;
+            SDLApp_EndFrame(&app_frame_timing);
+            const Uint64 end_end_ns = SDL_GetTicksNS();
+
+            const Uint64 game1_start_ns = end_end_ns;
             game_step_1();
+            const Uint64 frame_end_ns = SDL_GetTicksNS();
+
+            double end_ms = elapsed_ms(end_start_ns, end_end_ns) - app_frame_timing.sleep_ms;
+
+            if (end_ms < 0.0) {
+                end_ms = 0.0;
+            }
+
+            const double total_ms = elapsed_ms(frame_start_ns, frame_end_ns);
+            DebugFrameTiming frame_timing = {
+                .frame = debug_frame,
+                .total_ms = total_ms,
+                .poll_ms = elapsed_ms(poll_start_ns, poll_end_ns),
+                .begin_ms = elapsed_ms(begin_start_ns, begin_end_ns),
+                .game0_ms = elapsed_ms(game0_start_ns, game0_end_ns),
+                .end_ms = end_ms,
+                .game1_ms = elapsed_ms(game1_start_ns, frame_end_ns),
+                .sleep_ms = app_frame_timing.sleep_ms,
+                .late_flag = total_ms > late_frame_threshold_ms ? 1 : 0,
+            };
+
+            DebugLog_RecordFrameTiming(&frame_timing);
+            debug_frame += 1;
             break;
         }
     }

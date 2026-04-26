@@ -5,6 +5,10 @@
 
 #define TARGET_FPS 59.59949
 
+typedef struct SDLAppFrameTiming {
+    double sleep_ms;
+} SDLAppFrameTiming;
+
 int SDLApp_PreInit();
 int SDLApp_FullInit();
 void SDLApp_WriteDebugSessionInfo();
@@ -15,7 +19,7 @@ void SDLApp_Quit();
 bool SDLApp_PollEvents();
 
 void SDLApp_BeginFrame();
-void SDLApp_EndFrame();
+void SDLApp_EndFrame(SDLAppFrameTiming* timing);
 void SDLApp_Exit();
 
 #endif

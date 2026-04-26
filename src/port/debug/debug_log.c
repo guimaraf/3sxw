@@ -5,11 +5,21 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 
 static bool debug_log_enabled = false;
 static bool debug_log_initialized = false;
 static char* debug_log_session_path = NULL;
+static FILE* frame_timing_file = NULL;
+static Uint64 session_start_ns = 0;
+static double* frame_total_ms_samples = NULL;
+static size_t frame_total_ms_count = 0;
+static size_t frame_total_ms_capacity = 0;
+static double frame_total_ms_sum = 0.0;
+static double worst_frame_ms = 0.0;
+static Uint64 worst_frame = 0;
+static Uint64 late_frame_count = 0;
 
 static bool get_local_time(struct tm* local_time) {
     const time_t now = time(NULL);
@@ -61,6 +71,128 @@ static void write_file(const char* file_name, const char* mode, const char* form
     va_start(args, format);
     write_file_v(file_name, mode, format, args);
     va_end(args);
+}
+
+static FILE* open_session_file(const char* file_name, const char* mode) {
+    if (!debug_log_enabled || debug_log_session_path == NULL) {
+        return NULL;
+    }
+
+    char* file_path = NULL;
+    SDL_asprintf(&file_path, "%s%s", debug_log_session_path, file_name);
+
+    FILE* file = fopen(file_path, mode);
+
+    if (file == NULL) {
+        SDL_Log("Failed to open debug log file: %s", file_path);
+    }
+
+    SDL_free(file_path);
+    return file;
+}
+
+static int compare_double(const void* a, const void* b) {
+    const double left = *(const double*)a;
+    const double right = *(const double*)b;
+
+    if (left < right) {
+        return -1;
+    }
+
+    if (left > right) {
+        return 1;
+    }
+
+    return 0;
+}
+
+static double percentile_ms(double percentile) {
+    if (frame_total_ms_count == 0) {
+        return 0.0;
+    }
+
+    qsort(frame_total_ms_samples, frame_total_ms_count, sizeof(double), compare_double);
+
+    size_t index = (size_t)((percentile * (double)frame_total_ms_count) + 0.999999) - 1;
+
+    if (index >= frame_total_ms_count) {
+        index = frame_total_ms_count - 1;
+    }
+
+    return frame_total_ms_samples[index];
+}
+
+static void write_summary_file() {
+    if (!debug_log_enabled) {
+        return;
+    }
+
+    FILE* file = open_session_file("summary.txt", "w");
+
+    if (file == NULL) {
+        return;
+    }
+
+    const Uint64 now_ns = SDL_GetTicksNS();
+    const double session_seconds = session_start_ns == 0 ? 0.0 : (double)(now_ns - session_start_ns) / 1e9;
+    const double avg_frame_ms = frame_total_ms_count == 0 ? 0.0 : frame_total_ms_sum / (double)frame_total_ms_count;
+    const double p95_frame_ms = percentile_ms(0.95);
+    const double p99_frame_ms = percentile_ms(0.99);
+
+    fprintf(file, "session_seconds=%.3f\n", session_seconds);
+    fprintf(file, "frames=%llu\n", (unsigned long long)frame_total_ms_count);
+    fprintf(file, "avg_frame_ms=%.3f\n", avg_frame_ms);
+    fprintf(file, "p95_frame_ms=%.3f\n", p95_frame_ms);
+    fprintf(file, "p99_frame_ms=%.3f\n", p99_frame_ms);
+    fprintf(file, "worst_frame_ms=%.3f\n", worst_frame_ms);
+    fprintf(file, "worst_frame=%llu\n", (unsigned long long)worst_frame);
+    fprintf(file, "late_frames=%llu\n", (unsigned long long)late_frame_count);
+    fprintf(file, "frame_timing_csv=%sframe_timing.csv\n", debug_log_session_path);
+    fclose(file);
+}
+
+static void reset_frame_timing_stats() {
+    if (frame_timing_file != NULL) {
+        fclose(frame_timing_file);
+        frame_timing_file = NULL;
+    }
+
+    SDL_free(frame_total_ms_samples);
+    frame_total_ms_samples = NULL;
+    frame_total_ms_count = 0;
+    frame_total_ms_capacity = 0;
+    frame_total_ms_sum = 0.0;
+    worst_frame_ms = 0.0;
+    worst_frame = 0;
+    late_frame_count = 0;
+    session_start_ns = 0;
+}
+
+static void open_frame_timing_file() {
+    frame_timing_file = open_session_file("frame_timing.csv", "w");
+
+    if (frame_timing_file == NULL) {
+        return;
+    }
+
+    fprintf(frame_timing_file, "frame,total_ms,poll_ms,begin_ms,game0_ms,end_ms,game1_ms,sleep_ms,late_flag\n");
+}
+
+static void store_frame_total_sample(double total_ms) {
+    if (frame_total_ms_count == frame_total_ms_capacity) {
+        const size_t new_capacity = frame_total_ms_capacity == 0 ? 4096 : frame_total_ms_capacity * 2;
+        double* new_samples = SDL_realloc(frame_total_ms_samples, new_capacity * sizeof(double));
+
+        if (new_samples == NULL) {
+            return;
+        }
+
+        frame_total_ms_samples = new_samples;
+        frame_total_ms_capacity = new_capacity;
+    }
+
+    frame_total_ms_samples[frame_total_ms_count] = total_ms;
+    frame_total_ms_count += 1;
 }
 
 static void format_timestamp(const struct tm* local_time, char* timestamp, size_t timestamp_size) {
@@ -125,12 +257,22 @@ void DebugLog_Init(int enabled, int argc, const char* command_line) {
     }
 
     debug_log_enabled = true;
+    session_start_ns = SDL_GetTicksNS();
     write_session_file(started_at, argc, command_line);
+    open_frame_timing_file();
 }
 
 void DebugLog_Shutdown() {
+    write_summary_file();
+
+    if (frame_timing_file != NULL) {
+        fclose(frame_timing_file);
+        frame_timing_file = NULL;
+    }
+
     debug_log_enabled = false;
     debug_log_initialized = false;
+    reset_frame_timing_stats();
 
     if (debug_log_session_path != NULL) {
         SDL_free(debug_log_session_path);
@@ -162,4 +304,40 @@ void DebugLog_PrintSession(const char* format, ...) {
     va_start(args, format);
     write_file_v("session.txt", "a", format, args);
     va_end(args);
+}
+
+void DebugLog_RecordFrameTiming(const DebugFrameTiming* timing) {
+    if (!debug_log_enabled || timing == NULL) {
+        return;
+    }
+
+    if (frame_timing_file != NULL) {
+        fprintf(frame_timing_file,
+                "%llu,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d\n",
+                (unsigned long long)timing->frame,
+                timing->total_ms,
+                timing->poll_ms,
+                timing->begin_ms,
+                timing->game0_ms,
+                timing->end_ms,
+                timing->game1_ms,
+                timing->sleep_ms,
+                timing->late_flag);
+
+        if ((timing->frame % 300) == 0) {
+            fflush(frame_timing_file);
+        }
+    }
+
+    store_frame_total_sample(timing->total_ms);
+    frame_total_ms_sum += timing->total_ms;
+
+    if (timing->total_ms > worst_frame_ms) {
+        worst_frame_ms = timing->total_ms;
+        worst_frame = timing->frame;
+    }
+
+    if (timing->late_flag) {
+        late_frame_count += 1;
+    }
 }

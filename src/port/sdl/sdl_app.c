@@ -395,7 +395,11 @@ static void save_texture(SDL_Texture* texture, const char* filename) {
     SDL_DestroySurface(rendered_surface);
 }
 
-void SDLApp_EndFrame() {
+void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
+    if (timing != NULL) {
+        timing->sleep_ms = 0.0;
+    }
+
     // Run sound processing
     ADX_ProcessTracks();
 
@@ -462,7 +466,13 @@ void SDLApp_EndFrame() {
     if (now < frame_deadline) {
         Uint64 sleep_time = frame_deadline - now;
         SDL_DelayNS(sleep_time);
-        now = SDL_GetTicksNS();
+        const Uint64 wake_time = SDL_GetTicksNS();
+
+        if (timing != NULL) {
+            timing->sleep_ms = (double)(wake_time - now) / 1e6;
+        }
+
+        now = wake_time;
     }
 
     frame_deadline += target_frame_time_ns;
