@@ -63,22 +63,25 @@ static void write_file(const char* file_name, const char* mode, const char* form
     va_end(args);
 }
 
-static void write_session_file(int argc, const char* argv[]) {
-    write_file("session.txt", "w", "debug_mode=1\n");
-    write_file("session.txt", "a", "build_date=%s\n", __DATE__);
-    write_file("session.txt", "a", "build_time=%s\n", __TIME__);
-    write_file("session.txt", "a", "session_path=%s\n", debug_log_session_path);
-    write_file("session.txt", "a", "argc=%d\n", argc);
-    write_file("session.txt", "a", "argv=");
-
-    for (int i = 0; i < argc; i++) {
-        write_file("session.txt", "a", "%s%s", i == 0 ? "" : " ", argv[i]);
+static void format_timestamp(const struct tm* local_time, char* timestamp, size_t timestamp_size) {
+    if (strftime(timestamp, timestamp_size, "%Y-%m-%d %H:%M:%S", local_time) == 0) {
+        SDL_snprintf(timestamp, timestamp_size, "unknown-time");
     }
-
-    write_file("session.txt", "a", "\n");
 }
 
-void DebugLog_Init(int enabled, int argc, const char* argv[]) {
+static void write_session_file(const char* started_at, int argc, const char* command_line) {
+    write_file("session.txt", "w", "debug_mode=1\n");
+    write_file("session.txt", "a", "started_at=%s\n", started_at);
+    write_file("session.txt", "a", "build_date=%s\n", __DATE__);
+    write_file("session.txt", "a", "build_time=%s\n", __TIME__);
+    write_file("session.txt", "a", "base_path=%s\n", Paths_GetBasePath());
+    write_file("session.txt", "a", "data_path=%s\n", Paths_GetDataPath());
+    write_file("session.txt", "a", "session_path=%s\n", debug_log_session_path);
+    write_file("session.txt", "a", "argc=%d\n", argc);
+    write_file("session.txt", "a", "argv=%s\n", command_line != NULL ? command_line : "");
+}
+
+void DebugLog_Init(int enabled, int argc, const char* command_line) {
     if (debug_log_initialized) {
         return;
     }
@@ -100,15 +103,18 @@ void DebugLog_Init(int enabled, int argc, const char* argv[]) {
     }
 
     struct tm local_time = { 0 };
-    char timestamp[32] = { 0 };
+    char session_timestamp[32] = { 0 };
+    char started_at[32] = { 0 };
 
     if (get_local_time(&local_time)) {
-        strftime(timestamp, sizeof(timestamp), "%Y%m%d-%H%M%S", &local_time);
+        strftime(session_timestamp, sizeof(session_timestamp), "%Y%m%d-%H%M%S", &local_time);
+        format_timestamp(&local_time, started_at, sizeof(started_at));
     } else {
-        SDL_snprintf(timestamp, sizeof(timestamp), "unknown-time");
+        SDL_snprintf(session_timestamp, sizeof(session_timestamp), "unknown-time");
+        SDL_snprintf(started_at, sizeof(started_at), "unknown-time");
     }
 
-    SDL_asprintf(&debug_log_session_path, "%ssession-%s/", debug_path, timestamp);
+    SDL_asprintf(&debug_log_session_path, "%ssession-%s/", debug_path, session_timestamp);
     SDL_free(debug_path);
 
     if (!ensure_directory(debug_log_session_path)) {
@@ -119,7 +125,7 @@ void DebugLog_Init(int enabled, int argc, const char* argv[]) {
     }
 
     debug_log_enabled = true;
-    write_session_file(argc, argv);
+    write_session_file(started_at, argc, command_line);
 }
 
 void DebugLog_Shutdown() {
@@ -148,5 +154,12 @@ void DebugLog_Printf(const char* file_name, const char* format, ...) {
     va_list args;
     va_start(args, format);
     write_file_v(file_name, "a", format, args);
+    va_end(args);
+}
+
+void DebugLog_PrintSession(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    write_file_v("session.txt", "a", format, args);
     va_end(args);
 }

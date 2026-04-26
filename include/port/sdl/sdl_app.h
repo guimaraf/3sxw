@@ -7,6 +7,7 @@
 
 int SDLApp_PreInit();
 int SDLApp_FullInit();
+void SDLApp_WriteDebugSessionInfo();
 void SDLApp_Quit();
 
 /// @brief Poll SDL events.

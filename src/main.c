@@ -73,7 +73,7 @@ static u8 texcash_melt_buffer_mem[0x1000];
 static u8 tpu_free_mem[0x2000];
 static MainPhase phase = MAIN_PHASE_INIT;
 static int main_argc = 0;
-static const char** main_argv = NULL;
+static char* main_command_line = NULL;
 
 static u8* mppMalloc(u32 size) {
     return flAllocMemory(size);
@@ -169,6 +169,7 @@ static void init_windows_console() {
 
 static void initialize_game() {
     SDLApp_FullInit();
+    SDLApp_WriteDebugSessionInfo();
 
 #if _WIN32 && DEBUG
     init_windows_console();
@@ -182,6 +183,8 @@ static void initialize_game() {
 static void cleanup() {
     AFS_Finish();
     DebugLog_Shutdown();
+    SDL_free(main_command_line);
+    main_command_line = NULL;
     SDLApp_Quit();
 }
 
@@ -416,7 +419,7 @@ static int loop() {
         switch (phase) {
         case MAIN_PHASE_INIT:
             SDLApp_PreInit();
-            DebugLog_Init(configuration.debug_runtime.enabled, main_argc, main_argv);
+            DebugLog_Init(configuration.debug_runtime.enabled, main_argc, main_command_line);
 
             if (Resources_Check()) {
                 initialize_game();
@@ -466,7 +469,18 @@ static int loop() {
 
 int main(int argc, const char* argv[]) {
     main_argc = argc;
-    main_argv = argv;
+
+    for (int i = 0; i < argc; i++) {
+        char* next_command_line = NULL;
+        SDL_asprintf(&next_command_line,
+                     "%s%s%s",
+                     main_command_line == NULL ? "" : main_command_line,
+                     i == 0 ? "" : " ",
+                     argv[i] != NULL ? argv[i] : "");
+        SDL_free(main_command_line);
+        main_command_line = next_command_line;
+    }
+
     read_args(argc, argv, &configuration);
     return loop();
 }

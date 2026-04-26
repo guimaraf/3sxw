@@ -2,6 +2,7 @@
 #include "common.h"
 #include "port/config/config.h"
 #include "port/config/keymap.h"
+#include "port/debug/debug_log.h"
 #include "port/sdl/netplay_screen.h"
 #include "port/sdl/netstats_renderer.h"
 #include "port/sdl/sdl_debug_text.h"
@@ -44,6 +45,27 @@ static Uint64 frame_counter = 0;
 static bool should_save_screenshot = false;
 static Uint64 last_mouse_motion_time = 0;
 static const int mouse_hide_delay_ms = 2000; // 2 seconds
+
+static const char* scale_mode_name() {
+    switch (scale_mode) {
+    case SCALEMODE_NEAREST:
+        return "nearest";
+
+    case SCALEMODE_LINEAR:
+        return "linear";
+
+    case SCALEMODE_SOFT_LINEAR:
+        return "soft-linear";
+
+    case SCALEMODE_SQUARE_PIXELS:
+        return "square-pixels";
+
+    case SCALEMODE_INTEGER:
+        return "integer";
+    }
+
+    return "unknown";
+}
 
 static SDL_ScaleMode screen_texture_scale_mode() {
     switch (scale_mode) {
@@ -171,6 +193,30 @@ int SDLApp_FullInit() {
     SDLPad_Init();
 
     return 0;
+}
+
+void SDLApp_WriteDebugSessionInfo() {
+    if (!DebugLog_IsEnabled()) {
+        return;
+    }
+
+    if (window == NULL || renderer == NULL) {
+        return;
+    }
+
+    int window_width = 0;
+    int window_height = 0;
+    int output_width = 0;
+    int output_height = 0;
+
+    SDL_GetWindowSize(window, &window_width, &window_height);
+    SDL_GetRenderOutputSize(renderer, &output_width, &output_height);
+
+    DebugLog_PrintSession("scale_mode=%s\n", scale_mode_name());
+    DebugLog_PrintSession("window_width=%d\n", window_width);
+    DebugLog_PrintSession("window_height=%d\n", window_height);
+    DebugLog_PrintSession("render_output_width=%d\n", output_width);
+    DebugLog_PrintSession("render_output_height=%d\n", output_height);
 }
 
 void SDLApp_Quit() {
