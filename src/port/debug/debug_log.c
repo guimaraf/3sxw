@@ -12,6 +12,8 @@ static bool debug_log_enabled = false;
 static bool debug_log_initialized = false;
 static char* debug_log_session_path = NULL;
 static FILE* frame_timing_file = NULL;
+static FILE* render_stats_file = NULL;
+static FILE* event_log_file = NULL;
 static Uint64 session_start_ns = 0;
 static double* frame_total_ms_samples = NULL;
 static size_t frame_total_ms_count = 0;
@@ -20,6 +22,13 @@ static double frame_total_ms_sum = 0.0;
 static double worst_frame_ms = 0.0;
 static Uint64 worst_frame = 0;
 static Uint64 late_frame_count = 0;
+static int max_render_tasks = 0;
+static int max_geometry_calls = 0;
+static Uint64 total_texture_cache_misses = 0;
+static double worst_render_sort_ms = 0.0;
+static double worst_render_geometry_ms = 0.0;
+static Uint64 worst_render_sort_frame = 0;
+static Uint64 worst_render_geometry_frame = 0;
 
 static bool get_local_time(struct tm* local_time) {
     const time_t now = time(NULL);
@@ -147,7 +156,16 @@ static void write_summary_file() {
     fprintf(file, "worst_frame_ms=%.3f\n", worst_frame_ms);
     fprintf(file, "worst_frame=%llu\n", (unsigned long long)worst_frame);
     fprintf(file, "late_frames=%llu\n", (unsigned long long)late_frame_count);
+    fprintf(file, "max_render_tasks=%d\n", max_render_tasks);
+    fprintf(file, "max_geometry_calls=%d\n", max_geometry_calls);
+    fprintf(file, "total_texture_cache_misses=%llu\n", (unsigned long long)total_texture_cache_misses);
+    fprintf(file, "worst_render_sort_ms=%.3f\n", worst_render_sort_ms);
+    fprintf(file, "worst_render_sort_frame=%llu\n", (unsigned long long)worst_render_sort_frame);
+    fprintf(file, "worst_render_geometry_ms=%.3f\n", worst_render_geometry_ms);
+    fprintf(file, "worst_render_geometry_frame=%llu\n", (unsigned long long)worst_render_geometry_frame);
     fprintf(file, "frame_timing_csv=%sframe_timing.csv\n", debug_log_session_path);
+    fprintf(file, "render_stats_csv=%srender_stats.csv\n", debug_log_session_path);
+    fprintf(file, "event_log_csv=%sevent_log.csv\n", debug_log_session_path);
     fclose(file);
 }
 
@@ -155,6 +173,16 @@ static void reset_frame_timing_stats() {
     if (frame_timing_file != NULL) {
         fclose(frame_timing_file);
         frame_timing_file = NULL;
+    }
+
+    if (render_stats_file != NULL) {
+        fclose(render_stats_file);
+        render_stats_file = NULL;
+    }
+
+    if (event_log_file != NULL) {
+        fclose(event_log_file);
+        event_log_file = NULL;
     }
 
     SDL_free(frame_total_ms_samples);
@@ -166,6 +194,13 @@ static void reset_frame_timing_stats() {
     worst_frame = 0;
     late_frame_count = 0;
     session_start_ns = 0;
+    max_render_tasks = 0;
+    max_geometry_calls = 0;
+    total_texture_cache_misses = 0;
+    worst_render_sort_ms = 0.0;
+    worst_render_geometry_ms = 0.0;
+    worst_render_sort_frame = 0;
+    worst_render_geometry_frame = 0;
 }
 
 static void open_frame_timing_file() {
@@ -176,6 +211,41 @@ static void open_frame_timing_file() {
     }
 
     fprintf(frame_timing_file, "frame,total_ms,poll_ms,begin_ms,game0_ms,end_ms,game1_ms,sleep_ms,late_flag\n");
+}
+
+static void open_render_stats_file() {
+    render_stats_file = open_session_file("render_stats.csv", "w");
+
+    if (render_stats_file == NULL) {
+        return;
+    }
+
+    fprintf(render_stats_file, "frame,render_tasks,geometry_calls,texture_cache_misses,render_sort_ms,render_geometry_ms\n");
+}
+
+static void open_event_log_file() {
+    event_log_file = open_session_file("event_log.csv", "w");
+
+    if (event_log_file == NULL) {
+        return;
+    }
+
+    fprintf(event_log_file, "frame,event,value\n");
+}
+
+static void write_event(Uint64 frame, const char* event, const char* value_format, ...) {
+    if (event_log_file == NULL) {
+        return;
+    }
+
+    fprintf(event_log_file, "%llu,%s,", (unsigned long long)frame, event);
+
+    va_list args;
+    va_start(args, value_format);
+    vfprintf(event_log_file, value_format, args);
+    va_end(args);
+
+    fprintf(event_log_file, "\n");
 }
 
 static void store_frame_total_sample(double total_ms) {
@@ -260,6 +330,8 @@ void DebugLog_Init(int enabled, int argc, const char* command_line) {
     session_start_ns = SDL_GetTicksNS();
     write_session_file(started_at, argc, command_line);
     open_frame_timing_file();
+    open_render_stats_file();
+    open_event_log_file();
 }
 
 void DebugLog_Shutdown() {
@@ -268,6 +340,16 @@ void DebugLog_Shutdown() {
     if (frame_timing_file != NULL) {
         fclose(frame_timing_file);
         frame_timing_file = NULL;
+    }
+
+    if (render_stats_file != NULL) {
+        fclose(render_stats_file);
+        render_stats_file = NULL;
+    }
+
+    if (event_log_file != NULL) {
+        fclose(event_log_file);
+        event_log_file = NULL;
     }
 
     debug_log_enabled = false;
@@ -339,5 +421,58 @@ void DebugLog_RecordFrameTiming(const DebugFrameTiming* timing) {
 
     if (timing->late_flag) {
         late_frame_count += 1;
+    }
+}
+
+void DebugLog_RecordRenderStats(const DebugRenderStats* stats) {
+    if (!debug_log_enabled || stats == NULL) {
+        return;
+    }
+
+    if (render_stats_file != NULL) {
+        fprintf(render_stats_file,
+                "%llu,%d,%d,%d,%.3f,%.3f\n",
+                (unsigned long long)stats->frame,
+                stats->render_tasks,
+                stats->geometry_calls,
+                stats->texture_cache_misses,
+                stats->render_sort_ms,
+                stats->render_geometry_ms);
+
+        if ((stats->frame % 300) == 0) {
+            fflush(render_stats_file);
+        }
+    }
+
+    if (stats->render_tasks > max_render_tasks) {
+        max_render_tasks = stats->render_tasks;
+        write_event(stats->frame, "render_task_peak", "%d", stats->render_tasks);
+    }
+
+    if (stats->geometry_calls > max_geometry_calls) {
+        max_geometry_calls = stats->geometry_calls;
+    }
+
+    if (stats->texture_cache_misses > 0) {
+        total_texture_cache_misses += (Uint64)stats->texture_cache_misses;
+        write_event(stats->frame, "texture_cache_miss", "%d", stats->texture_cache_misses);
+    }
+
+    if (stats->render_sort_ms > worst_render_sort_ms) {
+        worst_render_sort_ms = stats->render_sort_ms;
+        worst_render_sort_frame = stats->frame;
+    }
+
+    if (stats->render_geometry_ms > worst_render_geometry_ms) {
+        worst_render_geometry_ms = stats->render_geometry_ms;
+        worst_render_geometry_frame = stats->frame;
+    }
+
+    if ((stats->render_sort_ms + stats->render_geometry_ms) >= 4.0) {
+        write_event(stats->frame, "render_spike_ms", "%.3f", stats->render_sort_ms + stats->render_geometry_ms);
+    }
+
+    if (event_log_file != NULL && (stats->frame % 300) == 0) {
+        fflush(event_log_file);
     }
 }

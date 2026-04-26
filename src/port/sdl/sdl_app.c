@@ -398,6 +398,7 @@ static void save_texture(SDL_Texture* texture, const char* filename) {
 void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
     if (timing != NULL) {
         timing->sleep_ms = 0.0;
+        SDL_zero(timing->render_stats);
     }
 
     // Run sound processing
@@ -409,7 +410,7 @@ void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
     // because NetstatsRenderer uses the existing SFIII rendering pipeline
     NetplayScreen_Render();
     NetstatsRenderer_Render();
-    SDLGameRenderer_RenderFrame();
+    SDLGameRenderer_RenderFrame(timing != NULL ? &timing->render_stats : NULL);
 
     if (should_save_screenshot) {
         save_texture(cps3_canvas, "screenshot_cps3.bmp");

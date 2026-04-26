@@ -518,6 +518,17 @@ static int loop() {
             };
 
             DebugLog_RecordFrameTiming(&frame_timing);
+
+            DebugRenderStats render_stats = {
+                .frame = debug_frame,
+                .render_tasks = app_frame_timing.render_stats.render_tasks,
+                .geometry_calls = app_frame_timing.render_stats.geometry_calls,
+                .texture_cache_misses = app_frame_timing.render_stats.texture_cache_misses,
+                .render_sort_ms = app_frame_timing.render_stats.render_sort_ms,
+                .render_geometry_ms = app_frame_timing.render_stats.render_geometry_ms,
+            };
+
+            DebugLog_RecordRenderStats(&render_stats);
             debug_frame += 1;
             break;
         }

@@ -33,11 +33,19 @@ typedef struct Sprite2 {
     unsigned int id;
 } Sprite2;
 
+typedef struct SDLGameRendererStats {
+    int render_tasks;
+    int geometry_calls;
+    int texture_cache_misses;
+    double render_sort_ms;
+    double render_geometry_ms;
+} SDLGameRendererStats;
+
 extern SDL_Texture* cps3_canvas;
 
 void SDLGameRenderer_Init(SDL_Renderer* renderer);
 void SDLGameRenderer_BeginFrame();
-void SDLGameRenderer_RenderFrame();
+void SDLGameRenderer_RenderFrame(SDLGameRendererStats* stats);
 void SDLGameRenderer_EndFrame();
 
 void SDLGameRenderer_CreateTexture(unsigned int th);

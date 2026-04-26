@@ -1,5 +1,6 @@
 #include "port/sdl/sdl_game_renderer.h"
 #include "common.h"
+#include "port/debug/debug_log.h"
 #include "port/utils.h"
 #include "sf33rd/AcrSDK/ps2/flps2etc.h"
 #include "sf33rd/AcrSDK/ps2/flps2render.h"
@@ -37,6 +38,7 @@ static SDL_Texture* textures_to_destroy[1024] = { NULL };
 static int textures_to_destroy_count = 0;
 static RenderTask render_tasks[RENDER_TASK_MAX] = { 0 };
 static int render_task_count = 0;
+static int texture_cache_miss_count = 0;
 
 // Debugging
 
@@ -162,6 +164,10 @@ static int compare_render_tasks(const RenderTask* a, const RenderTask* b) {
     }
 }
 
+static double elapsed_ms(Uint64 start_ns, Uint64 end_ns) {
+    return (double)(end_ns - start_ns) / 1e6;
+}
+
 // Colors
 
 #define clut_shuf(x) (((x) & ~0x18) | ((((x) & 0x08) << 1) | (((x) & 0x10) >> 1)))
@@ -225,6 +231,10 @@ void SDLGameRenderer_Init(SDL_Renderer* renderer) {
 }
 
 void SDLGameRenderer_BeginFrame() {
+    if (DebugLog_IsEnabled()) {
+        texture_cache_miss_count = 0;
+    }
+
     // Clear canvas
     const Uint8 r = (flPs2State.FrameClearColor >> 16) & 0xFF;
     const Uint8 g = (flPs2State.FrameClearColor >> 8) & 0xFF;
@@ -241,14 +251,37 @@ void SDLGameRenderer_BeginFrame() {
     SDL_RenderClear(_renderer);
 }
 
-void SDLGameRenderer_RenderFrame() {
+void SDLGameRenderer_RenderFrame(SDLGameRendererStats* stats) {
     SDL_SetRenderTarget(_renderer, cps3_canvas);
+
+    if (stats != NULL) {
+        SDL_zero(*stats);
+        stats->render_tasks = render_task_count;
+        stats->texture_cache_misses = texture_cache_miss_count;
+    }
+
+    const Uint64 sort_start_ns = stats != NULL ? SDL_GetTicksNS() : 0;
     qsort(render_tasks, render_task_count, sizeof(RenderTask), compare_render_tasks);
 
+    if (stats != NULL) {
+        const Uint64 sort_end_ns = SDL_GetTicksNS();
+        stats->render_sort_ms = elapsed_ms(sort_start_ns, sort_end_ns);
+    }
+
+    const Uint64 geometry_start_ns = stats != NULL ? SDL_GetTicksNS() : 0;
     for (int i = 0; i < render_task_count; i++) {
         const RenderTask* task = &render_tasks[i];
         const int indices[] = { 0, 1, 2, 1, 2, 3 };
         SDL_RenderGeometry(_renderer, task->texture, task->vertices, 4, indices, 6);
+
+        if (stats != NULL) {
+            stats->geometry_calls += 1;
+        }
+    }
+
+    if (stats != NULL) {
+        const Uint64 geometry_end_ns = SDL_GetTicksNS();
+        stats->render_geometry_ms = elapsed_ms(geometry_start_ns, geometry_end_ns);
     }
 
     if (draw_rect_borders) {
@@ -445,6 +478,10 @@ void SDLGameRenderer_SetTexture(unsigned int th) {
         SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
         SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
         texture_cache[texture_handle - 1][palette_handle] = texture;
+
+        if (DebugLog_IsEnabled()) {
+            texture_cache_miss_count += 1;
+        }
     }
 
     push_texture(texture);

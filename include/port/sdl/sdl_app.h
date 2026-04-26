@@ -5,8 +5,11 @@
 
 #define TARGET_FPS 59.59949
 
+#include "port/sdl/sdl_game_renderer.h"
+
 typedef struct SDLAppFrameTiming {
     double sleep_ms;
+    SDLGameRendererStats render_stats;
 } SDLAppFrameTiming;
 
 int SDLApp_PreInit();
