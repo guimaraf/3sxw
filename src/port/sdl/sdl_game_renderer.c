@@ -129,6 +129,8 @@ static TextureHandleStats texture_handle_stats[FL_TEXTURE_MAX + 1] = { 0 };
 static PaletteHandleStats palette_handle_stats[FL_PALETTE_MAX + 1] = { 0 };
 static Uint8* indexed_texture_rgba_buffer = NULL;
 static size_t indexed_texture_rgba_buffer_size = 0;
+static Uint8* indexed_texture_index8_buffer = NULL;
+static size_t indexed_texture_index8_buffer_size = 0;
 
 // Debugging
 
@@ -564,6 +566,25 @@ static bool ensure_indexed_texture_rgba_buffer(int width, int height) {
     return true;
 }
 
+static bool ensure_indexed_texture_index8_buffer(int width, int height) {
+    const size_t required_size = (size_t)width * (size_t)height;
+
+    if (indexed_texture_index8_buffer_size >= required_size) {
+        return true;
+    }
+
+    Uint8* new_buffer = SDL_realloc(indexed_texture_index8_buffer, required_size);
+
+    if (new_buffer == NULL) {
+        SDL_Log("Failed to allocate indexed texture INDEX8 buffer.");
+        return false;
+    }
+
+    indexed_texture_index8_buffer = new_buffer;
+    indexed_texture_index8_buffer_size = required_size;
+    return true;
+}
+
 static bool write_indexed_texture_rgba_pixels(const SDL_Surface* surface, const SDL_Palette* palette) {
     if (!is_indexed_surface(surface) || palette == NULL || !ensure_indexed_texture_rgba_buffer(surface->w, surface->h)) {
         return false;
@@ -593,6 +614,26 @@ static bool write_indexed_texture_rgba_pixels(const SDL_Surface* surface, const 
             *dst++ = color->g;
             *dst++ = color->b;
             *dst++ = color->a;
+        }
+    }
+
+    return true;
+}
+
+static bool write_index4_texture_index8_pixels(const SDL_Surface* surface) {
+    if (surface == NULL || surface->format != SDL_PIXELFORMAT_INDEX4LSB ||
+        !ensure_indexed_texture_index8_buffer(surface->w, surface->h)) {
+        return false;
+    }
+
+    Uint8* dst = indexed_texture_index8_buffer;
+
+    for (int y = 0; y < surface->h; y++) {
+        const Uint8* src = (const Uint8*)surface->pixels + ((size_t)y * (size_t)surface->pitch);
+
+        for (int x = 0; x < surface->w; x++) {
+            const Uint8 packed_indices = src[x / 2];
+            *dst++ = (x & 1) ? (packed_indices >> 4) : (packed_indices & 0xF);
         }
     }
 
@@ -630,7 +671,18 @@ static bool update_indexed_texture_pixels(SDL_Texture* texture, const SDL_Surfac
     }
 
     const Uint64 update_start_ns = SDL_GetTicksNS();
-    const bool updated = SDL_UpdateTexture(texture, NULL, surface->pixels, surface->pitch);
+    bool updated = false;
+
+    if (surface->format == SDL_PIXELFORMAT_INDEX4LSB) {
+        if (!write_index4_texture_index8_pixels(surface)) {
+            return false;
+        }
+
+        updated = SDL_UpdateTexture(texture, NULL, indexed_texture_index8_buffer, surface->w);
+    } else {
+        updated = SDL_UpdateTexture(texture, NULL, surface->pixels, surface->pitch);
+    }
+
     const Uint64 update_end_ns = SDL_GetTicksNS();
 
     if (!updated) {
@@ -642,6 +694,14 @@ static bool update_indexed_texture_pixels(SDL_Texture* texture, const SDL_Surfac
     indexed_texture_update_pixel_count += surface->w * surface->h;
     indexed_texture_update_ms += elapsed_ms(update_start_ns, update_end_ns);
     return true;
+}
+
+static SDL_PixelFormat indexed_texture_upload_format(const SDL_Surface* surface) {
+    if (surface->format == SDL_PIXELFORMAT_INDEX4LSB) {
+        return SDL_PIXELFORMAT_INDEX8;
+    }
+
+    return surface->format;
 }
 
 static bool update_indexed_texture_palette(SDL_Texture* texture, const SDL_Palette* palette) {
@@ -684,8 +744,8 @@ static SDL_Texture* create_indexed_rgba_streaming_texture(const SDL_Surface* sur
 }
 
 static SDL_Texture* create_indexed_palettized_texture(const SDL_Surface* surface, const SDL_Palette* palette) {
-    SDL_Texture* texture =
-        SDL_CreateTexture(_renderer, surface->format, SDL_TEXTUREACCESS_STATIC, surface->w, surface->h);
+    SDL_Texture* texture = SDL_CreateTexture(
+        _renderer, indexed_texture_upload_format(surface), SDL_TEXTUREACCESS_STATIC, surface->w, surface->h);
 
     if (texture == NULL) {
         SDL_Log("Failed to create indexed palettized texture: %s", SDL_GetError());

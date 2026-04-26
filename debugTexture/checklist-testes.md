@@ -93,6 +93,7 @@
    - Esperado: `total_indexed_palette_updates` aparece no `summary.txt`.
    - Esperado: `total_indexed_texture_rgba_fallbacks=0` se o SDL/driver aceitou textura paletizada.
    - Esperado: `total_indexed_texture_update_pixels` representa uploads de indices, nao conversao RGBA massiva.
+   - Esperado: handles 1, 2, 3 e 8 nao concentram mais fallback por textura 4bpp.
    - Se houver fallback: ordenar `texture_handle_stats.csv`, `palette_handle_stats.csv` e `texture_palette_handle_stats.csv` por `rgba_fallbacks`.
 
 4. Teste de gameplay real.
@@ -106,3 +107,26 @@
    - `total_indexed_texture_rgba_fallbacks` maior que zero sem entender quais texturas cairam no fallback.
    - `worst_frame_ms`, `p95_frame_ms` ou `p99_frame_ms` piores que a linha base de forma relevante.
    - Sensacao de input pior, mesmo que os numeros parecam bons.
+
+## Micro etapa 4.6 - Diagnostico de stutter em EndFrame
+
+1. Rodar com `--debug-mode --debug-indexed-texture-path`.
+   - Esperado: `render_stats.csv` contem colunas internas de `SDLApp_EndFrame`.
+   - Conferir principalmente:
+     - `adx_process_ms`;
+     - `game_renderer_render_ms`;
+     - `screen_copy_ms`;
+     - `present_ms`;
+     - `cleanup_ms`;
+     - `pacing_ms`.
+
+2. Reproduzir o stutter.
+   - Jogar Arcade ou Training ate soltar o primeiro Gou Hadouken do Akuma.
+   - Se notar stutter, fechar pelo menu e enviar a sessao.
+
+3. Analise esperada.
+   - `summary.txt` deve apontar `worst_*_ms` e `worst_*_frame`.
+   - `event_log.csv` deve registrar `*_spike_ms` quando algum trecho passar de 4 ms.
+   - Se `present_ms` for o pico, investigar driver/vsync/apresentacao.
+   - Se `adx_process_ms` for o pico, investigar audio/BGM/SFX.
+   - Se `game_renderer_render_ms` for o pico, voltar para render/textura.

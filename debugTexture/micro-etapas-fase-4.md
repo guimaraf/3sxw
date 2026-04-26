@@ -78,6 +78,7 @@ Escopo:
 - trocar o caminho experimental para tentar textura paletizada real do SDL3;
 - usar `SDL_SetTexturePalette` para trocar paleta sem converter textura inteira para RGBA;
 - enviar pixels indexados com `SDL_UpdateTexture` apenas quando os indices da textura mudarem;
+- expandir texturas `INDEX4LSB` para upload `INDEX8` no caminho paletizado quando necessario;
 - manter fallback para o prototipo RGBA streaming se o renderer/driver recusar textura paletizada;
 - registrar metricas separadas de update de textura, update de paleta e fallback RGBA.
 - registrar `rgba_fallbacks` nos CSVs por texture handle, palette handle e combinacao texture/palette.

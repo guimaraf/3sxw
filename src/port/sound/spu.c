@@ -1,6 +1,7 @@
 #include "port/sound/spu.h"
 
 #include "common.h"
+#include "port/debug/debug_log.h"
 #include <SDL3/SDL.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -370,11 +371,18 @@ void SPU_Init(void (*cb)()) {
 }
 
 void SPU_Upload(u32 dst, void* src, u32 size) {
+    const bool record_timing = DebugLog_IsEnabled();
+    const Uint64 start_ns = record_timing ? SDL_GetTicksNS() : 0;
+
     SDL_LockMutex(soundLock);
 
     memcpy(&ram[dst >> 1], src, size);
 
     SDL_UnlockMutex(soundLock);
+
+    if (record_timing) {
+        DebugLog_RecordSpuUpload(size, (double)(SDL_GetTicksNS() - start_ns) / 1e6);
+    }
 }
 
 void SPU_Tick(s16* output) {

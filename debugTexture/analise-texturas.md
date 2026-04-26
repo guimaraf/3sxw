@@ -109,6 +109,14 @@ Fallback:
 - qualquer fallback maior que zero deve ser analisado antes de considerar a
   etapa concluida.
 
+Correcao para texturas 4bpp:
+- algumas texturas `INDEX4LSB` podem nao ser aceitas diretamente como textura
+  paletizada pelo SDL Renderer;
+- para preservar o caminho indexado, o renderer expande os indices 4bpp para
+  um buffer `INDEX8` antes do `SDL_UpdateTexture`;
+- isso continua evitando a conversao textura+paleta para RGBA e deve reduzir
+  ou eliminar fallbacks dos handles que usam textura 4bpp.
+
 Novos campos:
 - `indexed_palette_updates`
 - `indexed_palette_update_ms`
@@ -118,3 +126,28 @@ Novos campos:
 - `indexed_texture_rgba_fallbacks`
 - `total_indexed_texture_rgba_fallbacks`
 - `rgba_fallbacks` nos CSVs por handle
+
+## Micro etapa 4.6
+
+As runs longas mostraram stutter em frames onde textura e paleta estavam
+baratas. Para separar o custo interno de `SDLApp_EndFrame`, o CSV
+`render_stats.csv` passa a incluir:
+
+- `adx_process_ms`
+- `netplay_screen_render_ms`
+- `netstats_render_ms`
+- `game_renderer_render_ms`
+- `screenshot_ms`
+- `screen_copy_ms`
+- `debug_text_ms`
+- `present_ms`
+- `cleanup_ms`
+- `cursor_ms`
+- `pacing_ms`
+
+Interpretacao:
+- pico em `present_ms`: provavel bloqueio de apresentacao/vsync/driver;
+- pico em `adx_process_ms`: candidato em audio;
+- pico em `game_renderer_render_ms`: voltar para render/textura;
+- pico em `screen_copy_ms`: investigar copia para `screen_texture` e escala;
+- pico em `cleanup_ms`: investigar destruicao tardia de recursos.
