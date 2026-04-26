@@ -5,6 +5,7 @@
 #include "netplay/netplay.h"
 #include "port/debug/debug_log.h"
 #include "port/sdl/sdl_app.h"
+#include "port/sdl/sdl_game_renderer.h"
 #include "sf33rd/AcrSDK/common/mlPAD.h"
 #include "sf33rd/AcrSDK/ps2/flps2debug.h"
 #include "sf33rd/AcrSDK/ps2/flps2etc.h"
@@ -425,7 +426,10 @@ static int loop() {
         switch (phase) {
         case MAIN_PHASE_INIT:
             SDLApp_PreInit();
+            SDLGameRenderer_SetDebugIndexedTexturePathEnabled(configuration.debug_runtime.indexed_texture_path_enabled);
             DebugLog_Init(configuration.debug_runtime.enabled, main_argc, main_command_line);
+            DebugLog_PrintSession("debug_indexed_texture_path=%d\n",
+                                  configuration.debug_runtime.indexed_texture_path_enabled);
             DebugLog_PrintSession("target_frame_ms=%.3f\n", 1000.0 / TARGET_FPS);
             DebugLog_PrintSession("late_frame_threshold_ms=%.3f\n", late_frame_threshold_ms);
 

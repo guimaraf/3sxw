@@ -39,6 +39,7 @@ static int textures_to_destroy_count = 0;
 static RenderTask render_tasks[RENDER_TASK_MAX] = { 0 };
 static int render_task_count = 0;
 static int texture_cache_miss_count = 0;
+static bool debug_indexed_texture_path_enabled = false;
 
 // Debugging
 
@@ -228,6 +229,10 @@ void SDLGameRenderer_Init(SDL_Renderer* renderer) {
     cps3_canvas =
         SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, cps3_width, cps3_height);
     SDL_SetTextureScaleMode(cps3_canvas, SDL_SCALEMODE_NEAREST);
+}
+
+void SDLGameRenderer_SetDebugIndexedTexturePathEnabled(bool enabled) {
+    debug_indexed_texture_path_enabled = enabled;
 }
 
 void SDLGameRenderer_BeginFrame() {
