@@ -15,6 +15,7 @@
 #include <stdlib.h>
 
 #define RENDER_TASK_MAX 1024
+#define TEXTURE_DESTROY_QUEUE_INITIAL_CAPACITY 1024
 
 typedef struct RenderTask {
     SDL_Texture* texture;
@@ -100,8 +101,9 @@ static bool texture_cache_palette_dirty[FL_TEXTURE_MAX][FL_PALETTE_MAX + 1] = { 
 static bool texture_cache_used_this_frame[FL_TEXTURE_MAX][FL_PALETTE_MAX + 1] = { { false } };
 static bool texture_cache_has_been_created[FL_TEXTURE_MAX][FL_PALETTE_MAX + 1] = { { false } };
 static TextureCacheInvalidationReason texture_cache_last_invalidation[FL_TEXTURE_MAX][FL_PALETTE_MAX + 1] = { { 0 } };
-static SDL_Texture* textures_to_destroy[1024] = { NULL };
+static SDL_Texture** textures_to_destroy = NULL;
 static int textures_to_destroy_count = 0;
+static int textures_to_destroy_capacity = 0;
 static RenderTask render_tasks[RENDER_TASK_MAX] = { 0 };
 static int render_task_count = 0;
 static int texture_cache_miss_count = 0;
@@ -193,7 +195,19 @@ static void save_texture(const SDL_Surface* surface, const SDL_Palette* palette)
 
 // Textures
 
+static bool is_valid_texture_handle(int texture_handle) {
+    return texture_handle > 0 && texture_handle <= FL_TEXTURE_MAX;
+}
+
+static bool is_valid_palette_handle(int palette_handle) {
+    return palette_handle > 0 && palette_handle <= FL_PALETTE_MAX;
+}
+
 static void push_texture(SDL_Texture* texture) {
+    if (texture_count >= FL_PALETTE_MAX) {
+        fatal_error("Texture stack overflow");
+    }
+
     textures[texture_count] = texture;
     texture_count += 1;
 }
@@ -206,7 +220,42 @@ static SDL_Texture* get_texture() {
     return textures[texture_count - 1];
 }
 
+static bool reserve_textures_to_destroy(int required_capacity) {
+    if (textures_to_destroy_capacity >= required_capacity) {
+        return true;
+    }
+
+    int new_capacity = textures_to_destroy_capacity;
+
+    if (new_capacity == 0) {
+        new_capacity = TEXTURE_DESTROY_QUEUE_INITIAL_CAPACITY;
+    }
+
+    while (new_capacity < required_capacity) {
+        new_capacity *= 2;
+    }
+
+    SDL_Texture** new_textures_to_destroy =
+        SDL_realloc(textures_to_destroy, (size_t)new_capacity * sizeof(SDL_Texture*));
+
+    if (new_textures_to_destroy == NULL) {
+        return false;
+    }
+
+    textures_to_destroy = new_textures_to_destroy;
+    textures_to_destroy_capacity = new_capacity;
+    return true;
+}
+
 static void push_texture_to_destroy(SDL_Texture* texture) {
+    if (texture == NULL) {
+        return;
+    }
+
+    if (!reserve_textures_to_destroy(textures_to_destroy_count + 1)) {
+        fatal_error("Failed to grow texture destroy queue");
+    }
+
     textures_to_destroy[textures_to_destroy_count] = texture;
     textures_to_destroy_count += 1;
 }
@@ -228,6 +277,10 @@ static void destroy_textures() {
 static void push_render_task(RenderTask* task) {
     if (No_Trans) {
         printf("⚠️ Requesting a render task when no rendering is allowed is a programmer error!\n");
+    }
+
+    if (render_task_count >= RENDER_TASK_MAX) {
+        fatal_error("Render task queue overflow");
     }
 
     memcpy(&render_tasks[render_task_count], task, sizeof(RenderTask));
@@ -790,7 +843,7 @@ static bool should_use_experimental_indexed_texture(const SDL_Surface* surface, 
 }
 
 static void mark_experimental_textures_dirty_for_palette(int palette_handle) {
-    if (!should_record_texture_diagnostics() || palette_handle <= 0 || palette_handle >= FL_PALETTE_MAX) {
+    if (!should_record_texture_diagnostics() || !is_valid_palette_handle(palette_handle)) {
         return;
     }
 
@@ -810,7 +863,7 @@ static void mark_experimental_textures_dirty_for_palette(int palette_handle) {
 }
 
 static void mark_experimental_textures_dirty_for_texture(int texture_handle) {
-    if (!should_record_texture_diagnostics() || texture_handle <= 0 || texture_handle >= FL_TEXTURE_MAX) {
+    if (!should_record_texture_diagnostics() || !is_valid_texture_handle(texture_handle)) {
         return;
     }
 
@@ -1165,7 +1218,7 @@ void SDLGameRenderer_EndFrame() {
 void SDLGameRenderer_UnlockPalette(unsigned int ph) {
     const int palette_handle = ph;
 
-    if ((palette_handle > 0) && (palette_handle < FL_PALETTE_MAX)) {
+    if (is_valid_palette_handle(palette_handle)) {
         if (should_record_texture_diagnostics()) {
             palette_unlock_count += 1;
             ensure_texture_handle_stats();
@@ -1183,7 +1236,7 @@ void SDLGameRenderer_UnlockPalette(unsigned int ph) {
 void SDLGameRenderer_UnlockTexture(unsigned int th) {
     const int texture_handle = th;
 
-    if ((texture_handle > 0) && (texture_handle < FL_TEXTURE_MAX)) {
+    if (is_valid_texture_handle(texture_handle)) {
         if (should_record_texture_diagnostics()) {
             texture_unlock_count += 1;
             ensure_texture_handle_stats();
@@ -1236,6 +1289,10 @@ void SDLGameRenderer_CreateTexture(unsigned int th) {
 }
 
 void SDLGameRenderer_DestroyTexture(unsigned int texture_handle) {
+    if (!is_valid_texture_handle(texture_handle)) {
+        return;
+    }
+
     const int texture_index = texture_handle - 1;
 
     for (int i = 0; i < FL_PALETTE_MAX + 1; i++) {
@@ -1318,6 +1375,10 @@ void SDLGameRenderer_CreatePalette(unsigned int ph) {
 }
 
 void SDLGameRenderer_DestroyPalette(unsigned int palette_handle) {
+    if (!is_valid_palette_handle(palette_handle)) {
+        return;
+    }
+
     const int palette_index = palette_handle - 1;
 
     for (int i = 0; i < FL_TEXTURE_MAX; i++) {
