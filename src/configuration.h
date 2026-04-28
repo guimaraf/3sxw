@@ -13,6 +13,7 @@ typedef struct NetplayConfiguration {
 typedef struct DebugRuntimeConfiguration {
     int enabled;
     int indexed_texture_path_enabled;
+    int light_profile_enabled;
 } DebugRuntimeConfiguration;
 
 #if DEBUG

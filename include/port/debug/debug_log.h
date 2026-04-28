@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define DEBUG_TASK_STATS_COUNT 11
+
 typedef struct DebugFrameTiming {
     uint64_t frame;
     double total_ms;
@@ -77,7 +79,14 @@ typedef struct DebugStepStats {
     double bgm_server_ms;
 } DebugStepStats;
 
-void DebugLog_Init(int enabled, int argc, const char* command_line);
+typedef struct DebugTaskStats {
+    uint64_t frame;
+    int condition[DEBUG_TASK_STATS_COUNT];
+    int r_no[DEBUG_TASK_STATS_COUNT][4];
+    double task_ms[DEBUG_TASK_STATS_COUNT];
+} DebugTaskStats;
+
+void DebugLog_Init(int enabled, int light_profile_enabled, int argc, const char* command_line);
 void DebugLog_Shutdown();
 
 bool DebugLog_IsEnabled();
@@ -89,6 +98,7 @@ void DebugLog_PrintSession(const char* format, ...);
 void DebugLog_RecordFrameTiming(const DebugFrameTiming* timing);
 void DebugLog_RecordRenderStats(const DebugRenderStats* stats);
 void DebugLog_RecordStepStats(const DebugStepStats* stats);
+void DebugLog_RecordTaskStats(const DebugTaskStats* stats);
 void DebugLog_RecordSpuUpload(uint32_t bytes, double elapsed_ms);
 void DebugLog_RecordCseExecServer(double elapsed_ms);
 void DebugLog_RecordCseTsbRequest(double elapsed_ms);

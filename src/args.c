@@ -67,6 +67,13 @@ void read_args(int argc, const char* argv[], Configuration* configuration) {
                     NULL,
                     0,
                     0),
+        OPT_BOOLEAN(0,
+                    "debug-light-profile",
+                    &configuration->debug_runtime.light_profile_enabled,
+                    "Enable low-overhead runtime profiling.",
+                    NULL,
+                    0,
+                    0),
 
 #if DEBUG
         OPT_GROUP("Test runner"),

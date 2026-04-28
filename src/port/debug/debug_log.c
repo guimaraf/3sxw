@@ -10,10 +10,12 @@
 
 static bool debug_log_enabled = false;
 static bool debug_log_initialized = false;
+static bool debug_log_light_profile = false;
 static char* debug_log_session_path = NULL;
 static FILE* frame_timing_file = NULL;
 static FILE* render_stats_file = NULL;
 static FILE* step_stats_file = NULL;
+static FILE* task_stats_file = NULL;
 static FILE* event_log_file = NULL;
 static Uint64 session_start_ns = 0;
 static int current_spu_upload_count = 0;
@@ -43,6 +45,9 @@ static Uint64 worst_begin_frame = 0;
 static Uint64 worst_game0_frame = 0;
 static Uint64 worst_end_frame = 0;
 static Uint64 worst_game1_frame = 0;
+static double worst_task_ms = 0.0;
+static Uint64 worst_task_frame = 0;
+static int worst_task_index = 0;
 static int max_render_tasks = 0;
 static int max_geometry_calls = 0;
 static Uint64 total_texture_cache_misses = 0;
@@ -149,6 +154,10 @@ static void write_file(const char* file_name, const char* mode, const char* form
     va_end(args);
 }
 
+static bool verbose_events_enabled() {
+    return !debug_log_light_profile;
+}
+
 static FILE* open_session_file(const char* file_name, const char* mode) {
     if (!debug_log_enabled || debug_log_session_path == NULL) {
         return NULL;
@@ -233,6 +242,9 @@ static void write_summary_file() {
     fprintf(file, "worst_end_frame=%llu\n", (unsigned long long)worst_end_frame);
     fprintf(file, "worst_game1_ms=%.3f\n", worst_game1_ms);
     fprintf(file, "worst_game1_frame=%llu\n", (unsigned long long)worst_game1_frame);
+    fprintf(file, "worst_task_ms=%.3f\n", worst_task_ms);
+    fprintf(file, "worst_task_frame=%llu\n", (unsigned long long)worst_task_frame);
+    fprintf(file, "worst_task_index=%d\n", worst_task_index);
     fprintf(file, "max_render_tasks=%d\n", max_render_tasks);
     fprintf(file, "max_geometry_calls=%d\n", max_geometry_calls);
     fprintf(file, "total_texture_cache_misses=%llu\n", (unsigned long long)total_texture_cache_misses);
@@ -313,8 +325,15 @@ static void write_summary_file() {
     fprintf(file, "worst_sleep_overrun_ms=%.3f\n", worst_sleep_overrun_ms);
     fprintf(file, "worst_sleep_overrun_frame=%llu\n", (unsigned long long)worst_sleep_overrun_frame);
     fprintf(file, "frame_timing_csv=%sframe_timing.csv\n", debug_log_session_path);
-    fprintf(file, "render_stats_csv=%srender_stats.csv\n", debug_log_session_path);
-    fprintf(file, "step_stats_csv=%sstep_stats.csv\n", debug_log_session_path);
+    if (debug_log_light_profile) {
+        fprintf(file, "render_stats_csv=disabled_light_profile\n");
+        fprintf(file, "step_stats_csv=disabled_light_profile\n");
+        fprintf(file, "task_stats_csv=disabled_light_profile\n");
+    } else {
+        fprintf(file, "render_stats_csv=%srender_stats.csv\n", debug_log_session_path);
+        fprintf(file, "step_stats_csv=%sstep_stats.csv\n", debug_log_session_path);
+        fprintf(file, "task_stats_csv=%stask_stats.csv\n", debug_log_session_path);
+    }
     fprintf(file, "event_log_csv=%sevent_log.csv\n", debug_log_session_path);
     fclose(file);
 }
@@ -335,6 +354,11 @@ static void reset_frame_timing_stats() {
         step_stats_file = NULL;
     }
 
+    if (task_stats_file != NULL) {
+        fclose(task_stats_file);
+        task_stats_file = NULL;
+    }
+
     if (event_log_file != NULL) {
         fclose(event_log_file);
         event_log_file = NULL;
@@ -348,6 +372,7 @@ static void reset_frame_timing_stats() {
     worst_frame_ms = 0.0;
     worst_frame = 0;
     late_frame_count = 0;
+    debug_log_light_profile = false;
     current_spu_upload_count = 0;
     current_spu_upload_bytes = 0;
     current_spu_upload_ms = 0.0;
@@ -368,6 +393,9 @@ static void reset_frame_timing_stats() {
     worst_game0_frame = 0;
     worst_end_frame = 0;
     worst_game1_frame = 0;
+    worst_task_ms = 0.0;
+    worst_task_frame = 0;
+    worst_task_index = 0;
     session_start_ns = 0;
     max_render_tasks = 0;
     max_geometry_calls = 0;
@@ -471,6 +499,29 @@ static void open_step_stats_file() {
             "cse_send_bd_to_spu_bytes,cse_send_bd_to_spu_ms\n");
 }
 
+static void open_task_stats_file() {
+    task_stats_file = open_session_file("task_stats.csv", "w");
+
+    if (task_stats_file == NULL) {
+        return;
+    }
+
+    fprintf(task_stats_file, "frame");
+
+    for (int i = 0; i < DEBUG_TASK_STATS_COUNT; i++) {
+        fprintf(task_stats_file,
+                ",task%d_condition,task%d_ms,task%d_r0,task%d_r1,task%d_r2,task%d_r3",
+                i,
+                i,
+                i,
+                i,
+                i,
+                i);
+    }
+
+    fprintf(task_stats_file, "\n");
+}
+
 static void open_event_log_file() {
     event_log_file = open_session_file("event_log.csv", "w");
 
@@ -544,12 +595,13 @@ static void write_session_file(const char* started_at, int argc, const char* com
     write_file("session.txt", "a", "argv=%s\n", command_line != NULL ? command_line : "");
 }
 
-void DebugLog_Init(int enabled, int argc, const char* command_line) {
+void DebugLog_Init(int enabled, int light_profile_enabled, int argc, const char* command_line) {
     if (debug_log_initialized) {
         return;
     }
 
     debug_log_initialized = true;
+    debug_log_light_profile = light_profile_enabled != 0;
 
     if (!enabled) {
         return;
@@ -591,8 +643,11 @@ void DebugLog_Init(int enabled, int argc, const char* command_line) {
     session_start_ns = SDL_GetTicksNS();
     write_session_file(started_at, argc, command_line);
     open_frame_timing_file();
-    open_render_stats_file();
-    open_step_stats_file();
+    if (!debug_log_light_profile) {
+        open_render_stats_file();
+        open_step_stats_file();
+        open_task_stats_file();
+    }
     open_event_log_file();
 }
 
@@ -612,6 +667,11 @@ void DebugLog_Shutdown() {
     if (step_stats_file != NULL) {
         fclose(step_stats_file);
         step_stats_file = NULL;
+    }
+
+    if (task_stats_file != NULL) {
+        fclose(task_stats_file);
+        task_stats_file = NULL;
     }
 
     if (event_log_file != NULL) {
@@ -808,6 +868,47 @@ void DebugLog_RecordStepStats(const DebugStepStats* stats) {
     }
 }
 
+void DebugLog_RecordTaskStats(const DebugTaskStats* stats) {
+    if (!debug_log_enabled || stats == NULL) {
+        return;
+    }
+
+    if (task_stats_file != NULL) {
+        fprintf(task_stats_file, "%llu", (unsigned long long)stats->frame);
+
+        for (int i = 0; i < DEBUG_TASK_STATS_COUNT; i++) {
+            fprintf(task_stats_file,
+                    ",%d,%.3f,%d,%d,%d,%d",
+                    stats->condition[i],
+                    stats->task_ms[i],
+                    stats->r_no[i][0],
+                    stats->r_no[i][1],
+                    stats->r_no[i][2],
+                    stats->r_no[i][3]);
+        }
+
+        fprintf(task_stats_file, "\n");
+
+        if ((stats->frame % 300) == 0) {
+            fflush(task_stats_file);
+        }
+    }
+
+    for (int i = 0; i < DEBUG_TASK_STATS_COUNT; i++) {
+        if (stats->task_ms[i] > worst_task_ms) {
+            worst_task_ms = stats->task_ms[i];
+            worst_task_frame = stats->frame;
+            worst_task_index = i;
+        }
+
+        if (stats->task_ms[i] >= 2.0) {
+            char event_name[64];
+            SDL_snprintf(event_name, sizeof(event_name), "task_%d_spike_ms", i);
+            write_event(stats->frame, event_name, "%.3f", stats->task_ms[i]);
+        }
+    }
+}
+
 void DebugLog_RecordSpuUpload(uint32_t bytes, double elapsed_ms) {
     if (!debug_log_enabled) {
         return;
@@ -898,7 +999,9 @@ void DebugLog_RecordRenderStats(const DebugRenderStats* stats) {
 
     if (stats->render_tasks > max_render_tasks) {
         max_render_tasks = stats->render_tasks;
-        write_event(stats->frame, "render_task_peak", "%d", stats->render_tasks);
+        if (verbose_events_enabled()) {
+            write_event(stats->frame, "render_task_peak", "%d", stats->render_tasks);
+        }
     }
 
     if (stats->geometry_calls > max_geometry_calls) {
@@ -907,75 +1010,100 @@ void DebugLog_RecordRenderStats(const DebugRenderStats* stats) {
 
     if (stats->texture_cache_misses > 0) {
         total_texture_cache_misses += (Uint64)stats->texture_cache_misses;
-        write_event(stats->frame, "texture_cache_miss", "%d", stats->texture_cache_misses);
+        if (verbose_events_enabled()) {
+            write_event(stats->frame, "texture_cache_miss", "%d", stats->texture_cache_misses);
+        }
     }
 
     if (stats->texture_cache_misses_first_use > 0) {
         total_texture_cache_misses_first_use += (Uint64)stats->texture_cache_misses_first_use;
-        write_event(stats->frame, "texture_cache_miss_first_use", "%d", stats->texture_cache_misses_first_use);
+        if (verbose_events_enabled()) {
+            write_event(stats->frame, "texture_cache_miss_first_use", "%d", stats->texture_cache_misses_first_use);
+        }
     }
 
     if (stats->texture_cache_misses_after_palette_unlock > 0) {
         total_texture_cache_misses_after_palette_unlock +=
             (Uint64)stats->texture_cache_misses_after_palette_unlock;
-        write_event(stats->frame,
-                    "texture_cache_miss_after_palette_unlock",
-                    "%d",
-                    stats->texture_cache_misses_after_palette_unlock);
+        if (verbose_events_enabled()) {
+            write_event(stats->frame,
+                        "texture_cache_miss_after_palette_unlock",
+                        "%d",
+                        stats->texture_cache_misses_after_palette_unlock);
+        }
     }
 
     if (stats->texture_cache_misses_after_texture_unlock > 0) {
         total_texture_cache_misses_after_texture_unlock +=
             (Uint64)stats->texture_cache_misses_after_texture_unlock;
-        write_event(stats->frame,
-                    "texture_cache_miss_after_texture_unlock",
-                    "%d",
-                    stats->texture_cache_misses_after_texture_unlock);
+        if (verbose_events_enabled()) {
+            write_event(stats->frame,
+                        "texture_cache_miss_after_texture_unlock",
+                        "%d",
+                        stats->texture_cache_misses_after_texture_unlock);
+        }
     }
 
     if (stats->texture_cache_misses_after_release > 0) {
         total_texture_cache_misses_after_release += (Uint64)stats->texture_cache_misses_after_release;
-        write_event(stats->frame, "texture_cache_miss_after_release", "%d", stats->texture_cache_misses_after_release);
+        if (verbose_events_enabled()) {
+            write_event(
+                stats->frame, "texture_cache_miss_after_release", "%d", stats->texture_cache_misses_after_release);
+        }
     }
 
     if (stats->texture_cache_misses_unknown > 0) {
         total_texture_cache_misses_unknown += (Uint64)stats->texture_cache_misses_unknown;
-        write_event(stats->frame, "texture_cache_miss_unknown", "%d", stats->texture_cache_misses_unknown);
+        if (verbose_events_enabled()) {
+            write_event(stats->frame, "texture_cache_miss_unknown", "%d", stats->texture_cache_misses_unknown);
+        }
     }
 
     if (stats->palette_unlocks > 0) {
         total_palette_unlocks += (Uint64)stats->palette_unlocks;
-        write_event(stats->frame, "palette_unlock", "%d", stats->palette_unlocks);
+        if (verbose_events_enabled()) {
+            write_event(stats->frame, "palette_unlock", "%d", stats->palette_unlocks);
+        }
     }
 
     if (stats->texture_unlocks > 0) {
         total_texture_unlocks += (Uint64)stats->texture_unlocks;
-        write_event(stats->frame, "texture_unlock", "%d", stats->texture_unlocks);
+        if (verbose_events_enabled()) {
+            write_event(stats->frame, "texture_unlock", "%d", stats->texture_unlocks);
+        }
     }
 
     if (stats->palette_cache_invalidated_textures > 0) {
         total_palette_cache_invalidated_textures += (Uint64)stats->palette_cache_invalidated_textures;
-        write_event(
-            stats->frame, "palette_cache_invalidated_textures", "%d", stats->palette_cache_invalidated_textures);
+        if (verbose_events_enabled()) {
+            write_event(
+                stats->frame, "palette_cache_invalidated_textures", "%d", stats->palette_cache_invalidated_textures);
+        }
     }
 
     if (stats->texture_cache_invalidated_textures > 0) {
         total_texture_cache_invalidated_textures += (Uint64)stats->texture_cache_invalidated_textures;
-        write_event(
-            stats->frame, "texture_cache_invalidated_textures", "%d", stats->texture_cache_invalidated_textures);
+        if (verbose_events_enabled()) {
+            write_event(
+                stats->frame, "texture_cache_invalidated_textures", "%d", stats->texture_cache_invalidated_textures);
+        }
     }
 
     if (stats->release_cache_invalidated_textures > 0) {
         total_release_cache_invalidated_textures += (Uint64)stats->release_cache_invalidated_textures;
-        write_event(
-            stats->frame, "release_cache_invalidated_textures", "%d", stats->release_cache_invalidated_textures);
+        if (verbose_events_enabled()) {
+            write_event(
+                stats->frame, "release_cache_invalidated_textures", "%d", stats->release_cache_invalidated_textures);
+        }
     }
 
     if (stats->indexed_texture_updates > 0) {
         total_indexed_texture_updates += (Uint64)stats->indexed_texture_updates;
         total_indexed_texture_update_pixels += (Uint64)stats->indexed_texture_update_pixels;
         total_indexed_texture_update_ms += stats->indexed_texture_update_ms;
-        write_event(stats->frame, "indexed_texture_updates", "%d", stats->indexed_texture_updates);
+        if (verbose_events_enabled()) {
+            write_event(stats->frame, "indexed_texture_updates", "%d", stats->indexed_texture_updates);
+        }
     }
 
     if (stats->indexed_texture_update_ms > worst_indexed_texture_update_ms) {
@@ -986,7 +1114,9 @@ void DebugLog_RecordRenderStats(const DebugRenderStats* stats) {
     if (stats->indexed_palette_updates > 0) {
         total_indexed_palette_updates += (Uint64)stats->indexed_palette_updates;
         total_indexed_palette_update_ms += stats->indexed_palette_update_ms;
-        write_event(stats->frame, "indexed_palette_updates", "%d", stats->indexed_palette_updates);
+        if (verbose_events_enabled()) {
+            write_event(stats->frame, "indexed_palette_updates", "%d", stats->indexed_palette_updates);
+        }
     }
 
     if (stats->indexed_palette_update_ms > worst_indexed_palette_update_ms) {

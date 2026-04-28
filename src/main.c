@@ -75,6 +75,7 @@ static u8 tpu_free_mem[0x2000];
 static MainPhase phase = MAIN_PHASE_INIT;
 static int main_argc = 0;
 static char* main_command_line = NULL;
+static DebugTaskStats* debug_current_task_stats = NULL;
 
 static u8* mppMalloc(u32 size) {
     return flAllocMemory(size);
@@ -208,10 +209,28 @@ static void cpLoopTask() {
 
     for (int i = 0; i < 11; i++) {
         struct _TASK* task_ptr = &task[i];
+        Uint64 task_start_ns = 0;
+
+        if (debug_current_task_stats != NULL) {
+            debug_current_task_stats->condition[i] = task_ptr->condition;
+            debug_current_task_stats->r_no[i][0] = task_ptr->r_no[0];
+            debug_current_task_stats->r_no[i][1] = task_ptr->r_no[1];
+            debug_current_task_stats->r_no[i][2] = task_ptr->r_no[2];
+            debug_current_task_stats->r_no[i][3] = task_ptr->r_no[3];
+        }
 
         switch (task_ptr->condition) {
         case 1:
+            if (debug_current_task_stats != NULL) {
+                task_start_ns = SDL_GetTicksNS();
+            }
+
             task_ptr->func_adrs(task_ptr);
+
+            if (debug_current_task_stats != NULL) {
+                debug_current_task_stats->task_ms[i] = (double)(SDL_GetTicksNS() - task_start_ns) / 1e6;
+            }
+
             break;
 
         case 2:
@@ -330,7 +349,7 @@ static double debug_timing_elapsed(Uint64 start_ns) {
     return (double)(SDL_GetTicksNS() - start_ns) / 1e6;
 }
 
-static void game_step_0(DebugStepStats* step_stats) {
+static void game_step_0(DebugStepStats* step_stats, DebugTaskStats* task_stats) {
     Uint64 step_start_ns = debug_timing_start(step_stats);
     AFS_RunServer();
     if (step_stats != NULL) {
@@ -413,7 +432,10 @@ static void game_step_0(DebugStepStats* step_stats) {
         }
     } else {
         step_start_ns = debug_timing_start(step_stats);
+        DebugTaskStats* previous_task_stats = debug_current_task_stats;
+        debug_current_task_stats = task_stats;
         njUserMain();
+        debug_current_task_stats = previous_task_stats;
         if (step_stats != NULL) {
             step_stats->nj_user_main_ms = debug_timing_elapsed(step_start_ns);
         }
@@ -530,9 +552,13 @@ static int loop() {
             SDLApp_PreInit();
             SDLGameRenderer_SetDebugIndexedTexturePathEnabled(configuration.debug_runtime.enabled &&
                                                               configuration.debug_runtime.indexed_texture_path_enabled);
-            DebugLog_Init(configuration.debug_runtime.enabled, main_argc, main_command_line);
+            DebugLog_Init(configuration.debug_runtime.enabled,
+                          configuration.debug_runtime.light_profile_enabled,
+                          main_argc,
+                          main_command_line);
             DebugLog_PrintSession("debug_indexed_texture_path=%d\n",
                                   configuration.debug_runtime.indexed_texture_path_enabled);
+            DebugLog_PrintSession("debug_light_profile=%d\n", configuration.debug_runtime.light_profile_enabled);
             DebugLog_PrintSession("target_frame_ms=%.3f\n", 1000.0 / TARGET_FPS);
             DebugLog_PrintSession("late_frame_threshold_ms=%.3f\n", late_frame_threshold_ms);
 
@@ -572,7 +598,7 @@ static int loop() {
                 }
 
                 SDLApp_BeginFrame();
-                game_step_0(NULL);
+                game_step_0(NULL, NULL);
                 SDLApp_EndFrame(NULL);
                 game_step_1(NULL);
                 break;
@@ -594,9 +620,10 @@ static int loop() {
 
             const Uint64 game0_start_ns = begin_end_ns;
             DebugStepStats step_stats = { .frame = debug_frame };
+            DebugTaskStats task_stats = { .frame = debug_frame };
             DebugLog_BeginFrame(debug_frame);
 
-            game_step_0(&step_stats);
+            game_step_0(&step_stats, &task_stats);
             const Uint64 game0_end_ns = SDL_GetTicksNS();
 
             SDLAppFrameTiming app_frame_timing = { 0 };
@@ -629,6 +656,7 @@ static int loop() {
 
             DebugLog_RecordFrameTiming(&frame_timing);
             DebugLog_RecordStepStats(&step_stats);
+            DebugLog_RecordTaskStats(&task_stats);
 
             DebugRenderStats render_stats = {
                 .frame = debug_frame,
