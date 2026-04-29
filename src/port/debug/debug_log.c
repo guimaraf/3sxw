@@ -16,8 +16,32 @@ static FILE* frame_timing_file = NULL;
 static FILE* render_stats_file = NULL;
 static FILE* step_stats_file = NULL;
 static FILE* task_stats_file = NULL;
+static FILE* audio_stats_file = NULL;
 static FILE* event_log_file = NULL;
 static Uint64 session_start_ns = 0;
+static Uint64 current_frame = 0;
+static double current_adx_process_ms = 0.0;
+static int current_adx_queued_bytes = 0;
+static int current_adx_tracks = 0;
+static int current_adx_start_mem_count = 0;
+static Uint64 current_adx_start_mem_bytes = 0;
+static double current_adx_start_mem_ms = 0.0;
+static int current_adx_entry_afs_count = 0;
+static int current_adx_start_afs_count = 0;
+static int current_adx_last_file_id = -1;
+static double current_adx_start_file_ms = 0.0;
+static int current_adx_load_file_count = 0;
+static Uint64 current_adx_load_file_bytes = 0;
+static double current_adx_load_file_ms = 0.0;
+static int current_audio_afs_sync_read_count = 0;
+static int current_audio_afs_sync_read_sectors = 0;
+static Uint64 current_audio_afs_sync_read_bytes = 0;
+static double current_audio_afs_sync_read_ms = 0.0;
+static int current_audio_event = 0;
+static int current_afs_sync_read_count = 0;
+static int current_afs_sync_read_sectors = 0;
+static Uint64 current_afs_sync_read_bytes = 0;
+static double current_afs_sync_read_ms = 0.0;
 static int current_spu_upload_count = 0;
 static Uint64 current_spu_upload_bytes = 0;
 static double current_spu_upload_ms = 0.0;
@@ -76,6 +100,12 @@ static double worst_render_geometry_ms = 0.0;
 static Uint64 worst_render_sort_frame = 0;
 static Uint64 worst_render_geometry_frame = 0;
 static double worst_adx_process_ms = 0.0;
+static double worst_afs_sync_read_ms = 0.0;
+static double worst_audio_afs_sync_read_ms = 0.0;
+static double worst_adx_start_mem_ms = 0.0;
+static double worst_adx_entry_afs_ms = 0.0;
+static double worst_adx_start_afs_ms = 0.0;
+static double worst_adx_load_file_ms = 0.0;
 static double worst_netplay_screen_render_ms = 0.0;
 static double worst_netstats_render_ms = 0.0;
 static double worst_game_renderer_render_ms = 0.0;
@@ -89,6 +119,12 @@ static double worst_pacing_ms = 0.0;
 static double worst_pacing_overhead_ms = 0.0;
 static double worst_sleep_overrun_ms = 0.0;
 static Uint64 worst_adx_process_frame = 0;
+static Uint64 worst_afs_sync_read_frame = 0;
+static Uint64 worst_audio_afs_sync_read_frame = 0;
+static Uint64 worst_adx_start_mem_frame = 0;
+static Uint64 worst_adx_entry_afs_frame = 0;
+static Uint64 worst_adx_start_afs_frame = 0;
+static Uint64 worst_adx_load_file_frame = 0;
 static Uint64 worst_netplay_screen_render_frame = 0;
 static Uint64 worst_netstats_render_frame = 0;
 static Uint64 worst_game_renderer_render_frame = 0;
@@ -101,6 +137,32 @@ static Uint64 worst_cursor_frame = 0;
 static Uint64 worst_pacing_frame = 0;
 static Uint64 worst_pacing_overhead_frame = 0;
 static Uint64 worst_sleep_overrun_frame = 0;
+static Uint64 total_afs_sync_reads = 0;
+static Uint64 total_afs_sync_read_bytes = 0;
+static double total_afs_sync_read_ms = 0.0;
+static Uint64 total_audio_afs_sync_reads = 0;
+static Uint64 total_audio_afs_sync_read_bytes = 0;
+static double total_audio_afs_sync_read_ms = 0.0;
+static Uint64 total_adx_start_mem_count = 0;
+static Uint64 total_adx_start_mem_bytes = 0;
+static double total_adx_start_mem_ms = 0.0;
+static Uint64 total_adx_entry_afs_count = 0;
+static double total_adx_entry_afs_ms = 0.0;
+static Uint64 total_adx_start_afs_count = 0;
+static double total_adx_start_afs_ms = 0.0;
+static Uint64 total_adx_load_file_count = 0;
+static Uint64 total_adx_load_file_bytes = 0;
+static double total_adx_load_file_ms = 0.0;
+static int max_adx_queued_bytes = 0;
+static int max_adx_tracks = 0;
+
+enum {
+    DEBUG_AUDIO_EVENT_ADX_START_MEM = 1 << 0,
+    DEBUG_AUDIO_EVENT_ADX_ENTRY_AFS = 1 << 1,
+    DEBUG_AUDIO_EVENT_ADX_START_AFS = 1 << 2,
+    DEBUG_AUDIO_EVENT_ADX_LOAD_FILE = 1 << 3,
+    DEBUG_AUDIO_EVENT_AUDIO_AFS_SYNC_READ = 1 << 4,
+};
 
 static bool get_local_time(struct tm* local_time) {
     const time_t now = time(NULL);
@@ -296,6 +358,36 @@ static void write_summary_file() {
     fprintf(file, "worst_render_geometry_frame=%llu\n", (unsigned long long)worst_render_geometry_frame);
     fprintf(file, "worst_adx_process_ms=%.3f\n", worst_adx_process_ms);
     fprintf(file, "worst_adx_process_frame=%llu\n", (unsigned long long)worst_adx_process_frame);
+    fprintf(file, "worst_afs_sync_read_ms=%.3f\n", worst_afs_sync_read_ms);
+    fprintf(file, "worst_afs_sync_read_frame=%llu\n", (unsigned long long)worst_afs_sync_read_frame);
+    fprintf(file, "total_afs_sync_reads=%llu\n", (unsigned long long)total_afs_sync_reads);
+    fprintf(file, "total_afs_sync_read_bytes=%llu\n", (unsigned long long)total_afs_sync_read_bytes);
+    fprintf(file, "total_afs_sync_read_ms=%.3f\n", total_afs_sync_read_ms);
+    fprintf(file, "worst_audio_afs_sync_read_ms=%.3f\n", worst_audio_afs_sync_read_ms);
+    fprintf(file, "worst_audio_afs_sync_read_frame=%llu\n", (unsigned long long)worst_audio_afs_sync_read_frame);
+    fprintf(file, "total_audio_afs_sync_reads=%llu\n", (unsigned long long)total_audio_afs_sync_reads);
+    fprintf(file, "total_audio_afs_sync_read_bytes=%llu\n", (unsigned long long)total_audio_afs_sync_read_bytes);
+    fprintf(file, "total_audio_afs_sync_read_ms=%.3f\n", total_audio_afs_sync_read_ms);
+    fprintf(file, "worst_adx_start_mem_ms=%.3f\n", worst_adx_start_mem_ms);
+    fprintf(file, "worst_adx_start_mem_frame=%llu\n", (unsigned long long)worst_adx_start_mem_frame);
+    fprintf(file, "total_adx_start_mem_count=%llu\n", (unsigned long long)total_adx_start_mem_count);
+    fprintf(file, "total_adx_start_mem_bytes=%llu\n", (unsigned long long)total_adx_start_mem_bytes);
+    fprintf(file, "total_adx_start_mem_ms=%.3f\n", total_adx_start_mem_ms);
+    fprintf(file, "worst_adx_entry_afs_ms=%.3f\n", worst_adx_entry_afs_ms);
+    fprintf(file, "worst_adx_entry_afs_frame=%llu\n", (unsigned long long)worst_adx_entry_afs_frame);
+    fprintf(file, "total_adx_entry_afs_count=%llu\n", (unsigned long long)total_adx_entry_afs_count);
+    fprintf(file, "total_adx_entry_afs_ms=%.3f\n", total_adx_entry_afs_ms);
+    fprintf(file, "worst_adx_start_afs_ms=%.3f\n", worst_adx_start_afs_ms);
+    fprintf(file, "worst_adx_start_afs_frame=%llu\n", (unsigned long long)worst_adx_start_afs_frame);
+    fprintf(file, "total_adx_start_afs_count=%llu\n", (unsigned long long)total_adx_start_afs_count);
+    fprintf(file, "total_adx_start_afs_ms=%.3f\n", total_adx_start_afs_ms);
+    fprintf(file, "worst_adx_load_file_ms=%.3f\n", worst_adx_load_file_ms);
+    fprintf(file, "worst_adx_load_file_frame=%llu\n", (unsigned long long)worst_adx_load_file_frame);
+    fprintf(file, "total_adx_load_file_count=%llu\n", (unsigned long long)total_adx_load_file_count);
+    fprintf(file, "total_adx_load_file_bytes=%llu\n", (unsigned long long)total_adx_load_file_bytes);
+    fprintf(file, "total_adx_load_file_ms=%.3f\n", total_adx_load_file_ms);
+    fprintf(file, "max_adx_queued_bytes=%d\n", max_adx_queued_bytes);
+    fprintf(file, "max_adx_tracks=%d\n", max_adx_tracks);
     fprintf(file, "worst_netplay_screen_render_ms=%.3f\n", worst_netplay_screen_render_ms);
     fprintf(file,
             "worst_netplay_screen_render_frame=%llu\n",
@@ -335,6 +427,7 @@ static void write_summary_file() {
         fprintf(file, "task_stats_csv=%stask_stats.csv\n", debug_log_session_path);
     }
     fprintf(file, "event_log_csv=%sevent_log.csv\n", debug_log_session_path);
+    fprintf(file, "audio_stats_csv=%saudio_stats.csv\n", debug_log_session_path);
     fclose(file);
 }
 
@@ -359,6 +452,11 @@ static void reset_frame_timing_stats() {
         task_stats_file = NULL;
     }
 
+    if (audio_stats_file != NULL) {
+        fclose(audio_stats_file);
+        audio_stats_file = NULL;
+    }
+
     if (event_log_file != NULL) {
         fclose(event_log_file);
         event_log_file = NULL;
@@ -373,6 +471,29 @@ static void reset_frame_timing_stats() {
     worst_frame = 0;
     late_frame_count = 0;
     debug_log_light_profile = false;
+    current_frame = 0;
+    current_adx_process_ms = 0.0;
+    current_adx_queued_bytes = 0;
+    current_adx_tracks = 0;
+    current_adx_start_mem_count = 0;
+    current_adx_start_mem_bytes = 0;
+    current_adx_start_mem_ms = 0.0;
+    current_adx_entry_afs_count = 0;
+    current_adx_start_afs_count = 0;
+    current_adx_last_file_id = -1;
+    current_adx_start_file_ms = 0.0;
+    current_adx_load_file_count = 0;
+    current_adx_load_file_bytes = 0;
+    current_adx_load_file_ms = 0.0;
+    current_audio_afs_sync_read_count = 0;
+    current_audio_afs_sync_read_sectors = 0;
+    current_audio_afs_sync_read_bytes = 0;
+    current_audio_afs_sync_read_ms = 0.0;
+    current_audio_event = 0;
+    current_afs_sync_read_count = 0;
+    current_afs_sync_read_sectors = 0;
+    current_afs_sync_read_bytes = 0;
+    current_afs_sync_read_ms = 0.0;
     current_spu_upload_count = 0;
     current_spu_upload_bytes = 0;
     current_spu_upload_ms = 0.0;
@@ -438,6 +559,18 @@ static void reset_frame_timing_stats() {
     worst_pacing_overhead_ms = 0.0;
     worst_sleep_overrun_ms = 0.0;
     worst_adx_process_frame = 0;
+    worst_afs_sync_read_ms = 0.0;
+    worst_audio_afs_sync_read_ms = 0.0;
+    worst_adx_start_mem_ms = 0.0;
+    worst_adx_entry_afs_ms = 0.0;
+    worst_adx_start_afs_ms = 0.0;
+    worst_adx_load_file_ms = 0.0;
+    worst_afs_sync_read_frame = 0;
+    worst_audio_afs_sync_read_frame = 0;
+    worst_adx_start_mem_frame = 0;
+    worst_adx_entry_afs_frame = 0;
+    worst_adx_start_afs_frame = 0;
+    worst_adx_load_file_frame = 0;
     worst_netplay_screen_render_frame = 0;
     worst_netstats_render_frame = 0;
     worst_game_renderer_render_frame = 0;
@@ -450,6 +583,24 @@ static void reset_frame_timing_stats() {
     worst_pacing_frame = 0;
     worst_pacing_overhead_frame = 0;
     worst_sleep_overrun_frame = 0;
+    total_afs_sync_reads = 0;
+    total_afs_sync_read_bytes = 0;
+    total_afs_sync_read_ms = 0.0;
+    total_audio_afs_sync_reads = 0;
+    total_audio_afs_sync_read_bytes = 0;
+    total_audio_afs_sync_read_ms = 0.0;
+    total_adx_start_mem_count = 0;
+    total_adx_start_mem_bytes = 0;
+    total_adx_start_mem_ms = 0.0;
+    total_adx_entry_afs_count = 0;
+    total_adx_entry_afs_ms = 0.0;
+    total_adx_start_afs_count = 0;
+    total_adx_start_afs_ms = 0.0;
+    total_adx_load_file_count = 0;
+    total_adx_load_file_bytes = 0;
+    total_adx_load_file_ms = 0.0;
+    max_adx_queued_bytes = 0;
+    max_adx_tracks = 0;
 }
 
 static void open_frame_timing_file() {
@@ -522,6 +673,21 @@ static void open_task_stats_file() {
     fprintf(task_stats_file, "\n");
 }
 
+static void open_audio_stats_file() {
+    audio_stats_file = open_session_file("audio_stats.csv", "w");
+
+    if (audio_stats_file == NULL) {
+        return;
+    }
+
+    fprintf(audio_stats_file,
+            "frame,adx_process_ms,adx_queued_bytes,adx_tracks,afs_sync_read_ms,afs_sync_reads,"
+            "afs_sync_read_sectors,afs_sync_read_bytes,audio_afs_sync_read_ms,audio_afs_sync_reads,"
+            "audio_afs_sync_read_sectors,audio_afs_sync_read_bytes,adx_start_mem_count,adx_start_mem_bytes,"
+            "adx_start_mem_ms,adx_entry_afs_count,adx_start_afs_count,adx_last_file_id,adx_start_file_ms,"
+            "adx_load_file_count,adx_load_file_bytes,adx_load_file_ms,audio_event\n");
+}
+
 static void open_event_log_file() {
     event_log_file = open_session_file("event_log.csv", "w");
 
@@ -557,6 +723,42 @@ static void update_worst_ms(double value, Uint64 frame, double* worst_value, Uin
 static void write_spike_event(Uint64 frame, const char* event, double value) {
     if (value >= 4.0) {
         write_event(frame, event, "%.3f", value);
+    }
+}
+
+static void write_audio_stats(Uint64 frame) {
+    if (audio_stats_file == NULL) {
+        return;
+    }
+
+    fprintf(audio_stats_file,
+            "%llu,%.3f,%d,%d,%.3f,%d,%d,%llu,%.3f,%d,%d,%llu,%d,%llu,%.3f,%d,%d,%d,%.3f,%d,%llu,%.3f,%d\n",
+            (unsigned long long)frame,
+            current_adx_process_ms,
+            current_adx_queued_bytes,
+            current_adx_tracks,
+            current_afs_sync_read_ms,
+            current_afs_sync_read_count,
+            current_afs_sync_read_sectors,
+            (unsigned long long)current_afs_sync_read_bytes,
+            current_audio_afs_sync_read_ms,
+            current_audio_afs_sync_read_count,
+            current_audio_afs_sync_read_sectors,
+            (unsigned long long)current_audio_afs_sync_read_bytes,
+            current_adx_start_mem_count,
+            (unsigned long long)current_adx_start_mem_bytes,
+            current_adx_start_mem_ms,
+            current_adx_entry_afs_count,
+            current_adx_start_afs_count,
+            current_adx_last_file_id,
+            current_adx_start_file_ms,
+            current_adx_load_file_count,
+            (unsigned long long)current_adx_load_file_bytes,
+            current_adx_load_file_ms,
+            current_audio_event);
+
+    if ((frame % 300) == 0) {
+        fflush(audio_stats_file);
     }
 }
 
@@ -648,6 +850,7 @@ void DebugLog_Init(int enabled, int light_profile_enabled, int argc, const char*
         open_step_stats_file();
         open_task_stats_file();
     }
+    open_audio_stats_file();
     open_event_log_file();
 }
 
@@ -672,6 +875,11 @@ void DebugLog_Shutdown() {
     if (task_stats_file != NULL) {
         fclose(task_stats_file);
         task_stats_file = NULL;
+    }
+
+    if (audio_stats_file != NULL) {
+        fclose(audio_stats_file);
+        audio_stats_file = NULL;
     }
 
     if (event_log_file != NULL) {
@@ -716,12 +924,33 @@ void DebugLog_PrintSession(const char* format, ...) {
 }
 
 void DebugLog_BeginFrame(uint64_t frame) {
-    (void)frame;
-
     if (!debug_log_enabled) {
         return;
     }
 
+    current_frame = frame;
+    current_adx_process_ms = 0.0;
+    current_adx_queued_bytes = 0;
+    current_adx_tracks = 0;
+    current_adx_start_mem_count = 0;
+    current_adx_start_mem_bytes = 0;
+    current_adx_start_mem_ms = 0.0;
+    current_adx_entry_afs_count = 0;
+    current_adx_start_afs_count = 0;
+    current_adx_last_file_id = -1;
+    current_adx_start_file_ms = 0.0;
+    current_adx_load_file_count = 0;
+    current_adx_load_file_bytes = 0;
+    current_adx_load_file_ms = 0.0;
+    current_audio_afs_sync_read_count = 0;
+    current_audio_afs_sync_read_sectors = 0;
+    current_audio_afs_sync_read_bytes = 0;
+    current_audio_afs_sync_read_ms = 0.0;
+    current_audio_event = 0;
+    current_afs_sync_read_count = 0;
+    current_afs_sync_read_sectors = 0;
+    current_afs_sync_read_bytes = 0;
+    current_afs_sync_read_ms = 0.0;
     current_spu_upload_count = 0;
     current_spu_upload_bytes = 0;
     current_spu_upload_ms = 0.0;
@@ -909,6 +1138,130 @@ void DebugLog_RecordTaskStats(const DebugTaskStats* stats) {
     }
 }
 
+void DebugLog_RecordAdxProcess(double elapsed_ms, int queued_bytes, int tracks) {
+    if (!debug_log_enabled) {
+        return;
+    }
+
+    current_adx_process_ms = elapsed_ms;
+    current_adx_queued_bytes = queued_bytes;
+    current_adx_tracks = tracks;
+
+    if (queued_bytes > max_adx_queued_bytes) {
+        max_adx_queued_bytes = queued_bytes;
+    }
+
+    if (tracks > max_adx_tracks) {
+        max_adx_tracks = tracks;
+    }
+}
+
+void DebugLog_RecordAdxStartMem(size_t bytes, double elapsed_ms) {
+    if (!debug_log_enabled) {
+        return;
+    }
+
+    current_adx_start_mem_count += 1;
+    current_adx_start_mem_bytes += (Uint64)bytes;
+    current_adx_start_mem_ms += elapsed_ms;
+    current_audio_event |= DEBUG_AUDIO_EVENT_ADX_START_MEM;
+    total_adx_start_mem_count += 1;
+    total_adx_start_mem_bytes += (Uint64)bytes;
+    total_adx_start_mem_ms += elapsed_ms;
+    update_worst_ms(elapsed_ms, current_frame, &worst_adx_start_mem_ms, &worst_adx_start_mem_frame);
+    write_event(current_frame, "adx_start_mem_bytes", "%llu", (unsigned long long)bytes);
+    write_spike_event(current_frame, "adx_start_mem_spike_ms", elapsed_ms);
+}
+
+void DebugLog_RecordAdxEntryAfs(int file_id, double elapsed_ms) {
+    if (!debug_log_enabled) {
+        return;
+    }
+
+    current_adx_entry_afs_count += 1;
+    current_adx_last_file_id = file_id;
+    current_adx_start_file_ms += elapsed_ms;
+    current_audio_event |= DEBUG_AUDIO_EVENT_ADX_ENTRY_AFS;
+    total_adx_entry_afs_count += 1;
+    total_adx_entry_afs_ms += elapsed_ms;
+    update_worst_ms(elapsed_ms, current_frame, &worst_adx_entry_afs_ms, &worst_adx_entry_afs_frame);
+    write_event(current_frame, "adx_entry_file", "%d", file_id);
+    write_spike_event(current_frame, "adx_entry_afs_spike_ms", elapsed_ms);
+}
+
+void DebugLog_RecordAdxStartAfs(int file_id, double elapsed_ms) {
+    if (!debug_log_enabled) {
+        return;
+    }
+
+    current_adx_start_afs_count += 1;
+    current_adx_last_file_id = file_id;
+    current_adx_start_file_ms += elapsed_ms;
+    current_audio_event |= DEBUG_AUDIO_EVENT_ADX_START_AFS;
+    total_adx_start_afs_count += 1;
+    total_adx_start_afs_ms += elapsed_ms;
+    update_worst_ms(elapsed_ms, current_frame, &worst_adx_start_afs_ms, &worst_adx_start_afs_frame);
+    write_event(current_frame, "adx_start_file", "%d", file_id);
+    write_spike_event(current_frame, "adx_start_afs_spike_ms", elapsed_ms);
+}
+
+void DebugLog_RecordAdxLoadFile(int file_id, uint32_t bytes, double elapsed_ms) {
+    if (!debug_log_enabled) {
+        return;
+    }
+
+    current_adx_load_file_count += 1;
+    current_adx_load_file_bytes += bytes;
+    current_adx_load_file_ms += elapsed_ms;
+    current_adx_last_file_id = file_id;
+    current_audio_event |= DEBUG_AUDIO_EVENT_ADX_LOAD_FILE;
+    total_adx_load_file_count += 1;
+    total_adx_load_file_bytes += bytes;
+    total_adx_load_file_ms += elapsed_ms;
+    update_worst_ms(elapsed_ms, current_frame, &worst_adx_load_file_ms, &worst_adx_load_file_frame);
+    write_event(current_frame, "adx_load_file", "%d", file_id);
+    write_spike_event(current_frame, "adx_load_file_spike_ms", elapsed_ms);
+}
+
+void DebugLog_RecordAudioAfsSyncRead(int file_id, int sectors, uint32_t bytes, double elapsed_ms) {
+    if (!debug_log_enabled) {
+        return;
+    }
+
+    current_audio_afs_sync_read_count += 1;
+    current_audio_afs_sync_read_sectors += sectors;
+    current_audio_afs_sync_read_bytes += bytes;
+    current_audio_afs_sync_read_ms += elapsed_ms;
+    current_adx_last_file_id = file_id;
+    current_audio_event |= DEBUG_AUDIO_EVENT_AUDIO_AFS_SYNC_READ;
+    total_audio_afs_sync_reads += 1;
+    total_audio_afs_sync_read_bytes += bytes;
+    total_audio_afs_sync_read_ms += elapsed_ms;
+    update_worst_ms(elapsed_ms, current_frame, &worst_audio_afs_sync_read_ms, &worst_audio_afs_sync_read_frame);
+
+    if (elapsed_ms >= 1.0) {
+        write_event(current_frame, "afs_sync_read_ms", "%.3f", elapsed_ms);
+        write_event(current_frame, "afs_sync_read_file", "%d", file_id);
+        write_event(current_frame, "afs_sync_read_bytes", "%u", (unsigned int)bytes);
+    }
+}
+
+void DebugLog_RecordAfsSyncRead(int file_id, int sectors, uint32_t bytes, double elapsed_ms) {
+    if (!debug_log_enabled) {
+        return;
+    }
+
+    (void)file_id;
+    current_afs_sync_read_count += 1;
+    current_afs_sync_read_sectors += sectors;
+    current_afs_sync_read_bytes += bytes;
+    current_afs_sync_read_ms += elapsed_ms;
+    total_afs_sync_reads += 1;
+    total_afs_sync_read_bytes += bytes;
+    total_afs_sync_read_ms += elapsed_ms;
+    update_worst_ms(elapsed_ms, current_frame, &worst_afs_sync_read_ms, &worst_afs_sync_read_frame);
+}
+
 void DebugLog_RecordSpuUpload(uint32_t bytes, double elapsed_ms) {
     if (!debug_log_enabled) {
         return;
@@ -996,6 +1349,8 @@ void DebugLog_RecordRenderStats(const DebugRenderStats* stats) {
             fflush(render_stats_file);
         }
     }
+
+    write_audio_stats(stats->frame);
 
     if (stats->render_tasks > max_render_tasks) {
         max_render_tasks = stats->render_tasks;

@@ -406,6 +406,8 @@ void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
     if (timing != NULL) {
         timing->adx_process_ms = (double)(SDL_GetTicksNS() - adx_start_ns) / 1e6;
     }
+    DebugLog_RecordAdxProcess(
+        timing != NULL ? timing->adx_process_ms : 0.0, ADX_GetQueuedBytes(), ADX_GetNumFiles());
 
     // Render
 

@@ -20,6 +20,7 @@ void ADX_Pause(int pause);
 void ADX_StartSeamless();
 void ADX_StartMem(void* buf, size_t size);
 int ADX_GetNumFiles();
+int ADX_GetQueuedBytes();
 void ADX_EntryAfs(int file_id);
 void ADX_StartAfs(int file_id);
 void ADX_ResetEntry();

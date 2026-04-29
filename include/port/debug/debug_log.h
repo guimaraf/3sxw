@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #define DEBUG_TASK_STATS_COUNT 11
 
@@ -99,6 +100,13 @@ void DebugLog_RecordFrameTiming(const DebugFrameTiming* timing);
 void DebugLog_RecordRenderStats(const DebugRenderStats* stats);
 void DebugLog_RecordStepStats(const DebugStepStats* stats);
 void DebugLog_RecordTaskStats(const DebugTaskStats* stats);
+void DebugLog_RecordAdxProcess(double elapsed_ms, int queued_bytes, int tracks);
+void DebugLog_RecordAdxStartMem(size_t bytes, double elapsed_ms);
+void DebugLog_RecordAdxEntryAfs(int file_id, double elapsed_ms);
+void DebugLog_RecordAdxStartAfs(int file_id, double elapsed_ms);
+void DebugLog_RecordAdxLoadFile(int file_id, uint32_t bytes, double elapsed_ms);
+void DebugLog_RecordAudioAfsSyncRead(int file_id, int sectors, uint32_t bytes, double elapsed_ms);
+void DebugLog_RecordAfsSyncRead(int file_id, int sectors, uint32_t bytes, double elapsed_ms);
 void DebugLog_RecordSpuUpload(uint32_t bytes, double elapsed_ms);
 void DebugLog_RecordCseExecServer(double elapsed_ms);
 void DebugLog_RecordCseTsbRequest(double elapsed_ms);
