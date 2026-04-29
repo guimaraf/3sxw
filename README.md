@@ -45,6 +45,12 @@ In the original game, the character **Gill** must be unlocked by clearing the ga
 
 > **Note:** Gill is not available in Network (Netplay) mode, preserving online competitive balance.
 
+### Runtime debug mode
+
+This fork includes a runtime debug mode enabled with `--debug-mode`. It records diagnostic sessions under `data/debug/` with frame timing, render, audio, I/O, and input logs to help investigate stutter and performance issues.
+
+See [debug-mode.md](debug-mode.md) for commands, generated files, and reporting instructions.
+
 ---
 
 ## Resources
@@ -122,6 +128,12 @@ Isso torna o jogo 100% portatil: basta copiar a pasta para outro local ou comput
 No jogo original, o personagem **Gill** precisa ser desbloqueado terminando o jogo com todos os personagens. Neste fork, **Gill ja esta disponivel para todos os jogadores desde o inicio**, sem necessidade de cumprir nenhum requisito especial.
 
 > **Nota:** Gill nao esta disponivel no modo de jogo em rede (Netplay), mantendo a paridade competitiva online.
+
+### Modo debug em runtime
+
+Este fork inclui um modo debug em runtime ativado com `--debug-mode`. Ele grava sessoes de diagnostico em `data/debug/` com logs de frame timing, renderizacao, audio, I/O e input para ajudar a investigar stutter e problemas de performance.
+
+Veja [debug-mode.md](debug-mode.md) para comandos, arquivos gerados e instrucoes de reporte.
 
 ---
 
