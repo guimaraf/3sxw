@@ -413,6 +413,8 @@ static void game_step_0(DebugStepStats* step_stats, DebugTaskStats* task_stats) 
     }
 
     appCopyKeyData();
+    DebugLog_RecordInputState(0, io_w.data[0].sw, PLsw[0][0]);
+    DebugLog_RecordInputState(1, io_w.data[1].sw, PLsw[1][0]);
     if (step_stats != NULL) {
         step_stats->input_copy_ms = debug_timing_elapsed(step_start_ns);
     }

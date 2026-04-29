@@ -17,6 +17,7 @@ static FILE* render_stats_file = NULL;
 static FILE* step_stats_file = NULL;
 static FILE* task_stats_file = NULL;
 static FILE* audio_stats_file = NULL;
+static FILE* input_events_file = NULL;
 static FILE* event_log_file = NULL;
 static Uint64 session_start_ns = 0;
 static Uint64 current_frame = 0;
@@ -155,6 +156,13 @@ static Uint64 total_adx_load_file_bytes = 0;
 static double total_adx_load_file_ms = 0.0;
 static int max_adx_queued_bytes = 0;
 static int max_adx_tracks = 0;
+static uint32_t last_input_converted_state[2] = { 0 };
+static uint32_t input_held_frames[2][16] = { 0 };
+static bool input_state_initialized[2] = { false };
+static Uint64 total_input_events = 0;
+static Uint64 total_input_press_events = 0;
+static Uint64 total_input_release_events = 0;
+static uint32_t max_input_held_frames = 0;
 
 enum {
     DEBUG_AUDIO_EVENT_ADX_START_MEM = 1 << 0,
@@ -388,6 +396,10 @@ static void write_summary_file() {
     fprintf(file, "total_adx_load_file_ms=%.3f\n", total_adx_load_file_ms);
     fprintf(file, "max_adx_queued_bytes=%d\n", max_adx_queued_bytes);
     fprintf(file, "max_adx_tracks=%d\n", max_adx_tracks);
+    fprintf(file, "total_input_events=%llu\n", (unsigned long long)total_input_events);
+    fprintf(file, "total_input_press_events=%llu\n", (unsigned long long)total_input_press_events);
+    fprintf(file, "total_input_release_events=%llu\n", (unsigned long long)total_input_release_events);
+    fprintf(file, "max_input_held_frames=%u\n", (unsigned int)max_input_held_frames);
     fprintf(file, "worst_netplay_screen_render_ms=%.3f\n", worst_netplay_screen_render_ms);
     fprintf(file,
             "worst_netplay_screen_render_frame=%llu\n",
@@ -428,6 +440,7 @@ static void write_summary_file() {
     }
     fprintf(file, "event_log_csv=%sevent_log.csv\n", debug_log_session_path);
     fprintf(file, "audio_stats_csv=%saudio_stats.csv\n", debug_log_session_path);
+    fprintf(file, "input_events_csv=%sinput_events.csv\n", debug_log_session_path);
     fclose(file);
 }
 
@@ -455,6 +468,11 @@ static void reset_frame_timing_stats() {
     if (audio_stats_file != NULL) {
         fclose(audio_stats_file);
         audio_stats_file = NULL;
+    }
+
+    if (input_events_file != NULL) {
+        fclose(input_events_file);
+        input_events_file = NULL;
     }
 
     if (event_log_file != NULL) {
@@ -601,6 +619,13 @@ static void reset_frame_timing_stats() {
     total_adx_load_file_ms = 0.0;
     max_adx_queued_bytes = 0;
     max_adx_tracks = 0;
+    SDL_memset(last_input_converted_state, 0, sizeof(last_input_converted_state));
+    SDL_memset(input_held_frames, 0, sizeof(input_held_frames));
+    SDL_memset(input_state_initialized, 0, sizeof(input_state_initialized));
+    total_input_events = 0;
+    total_input_press_events = 0;
+    total_input_release_events = 0;
+    max_input_held_frames = 0;
 }
 
 static void open_frame_timing_file() {
@@ -688,6 +713,17 @@ static void open_audio_stats_file() {
             "adx_load_file_count,adx_load_file_bytes,adx_load_file_ms,audio_event\n");
 }
 
+static void open_input_events_file() {
+    input_events_file = open_session_file("input_events.csv", "w");
+
+    if (input_events_file == NULL) {
+        return;
+    }
+
+    fprintf(input_events_file,
+            "frame,player,raw_state,converted_state,previous_state,changed_bits,event_type,held_frames,source\n");
+}
+
 static void open_event_log_file() {
     event_log_file = open_session_file("event_log.csv", "w");
 
@@ -759,6 +795,57 @@ static void write_audio_stats(Uint64 frame) {
 
     if ((frame % 300) == 0) {
         fflush(audio_stats_file);
+    }
+}
+
+static uint32_t input_max_held_frames(int player, uint32_t bits) {
+    uint32_t max_held = 0;
+
+    for (int i = 0; i < 16; i++) {
+        if ((bits & (1u << i)) != 0 && input_held_frames[player][i] > max_held) {
+            max_held = input_held_frames[player][i];
+        }
+    }
+
+    return max_held;
+}
+
+static void write_input_event(int player,
+                              uint32_t raw_state,
+                              uint32_t converted_state,
+                              uint32_t previous_state,
+                              uint32_t changed_bits,
+                              const char* event_type,
+                              uint32_t held_frames) {
+    if (input_events_file == NULL || changed_bits == 0) {
+        return;
+    }
+
+    fprintf(input_events_file,
+            "%llu,%d,0x%08X,0x%04X,0x%04X,0x%04X,%s,%u,converted\n",
+            (unsigned long long)current_frame,
+            player,
+            (unsigned int)raw_state,
+            (unsigned int)(converted_state & 0xFFFFu),
+            (unsigned int)(previous_state & 0xFFFFu),
+            (unsigned int)(changed_bits & 0xFFFFu),
+            event_type,
+            (unsigned int)held_frames);
+
+    total_input_events += 1;
+
+    if (SDL_strcmp(event_type, "press") == 0) {
+        total_input_press_events += 1;
+    } else if (SDL_strcmp(event_type, "release") == 0) {
+        total_input_release_events += 1;
+    }
+
+    if (held_frames > max_input_held_frames) {
+        max_input_held_frames = held_frames;
+    }
+
+    if ((total_input_events % 128) == 0) {
+        fflush(input_events_file);
     }
 }
 
@@ -851,6 +938,7 @@ void DebugLog_Init(int enabled, int light_profile_enabled, int argc, const char*
         open_task_stats_file();
     }
     open_audio_stats_file();
+    open_input_events_file();
     open_event_log_file();
 }
 
@@ -880,6 +968,11 @@ void DebugLog_Shutdown() {
     if (audio_stats_file != NULL) {
         fclose(audio_stats_file);
         audio_stats_file = NULL;
+    }
+
+    if (input_events_file != NULL) {
+        fclose(input_events_file);
+        input_events_file = NULL;
     }
 
     if (event_log_file != NULL) {
@@ -1298,6 +1391,50 @@ void DebugLog_RecordCseSendBdToSpu(uint32_t bytes, double elapsed_ms) {
     current_cse_send_bd_to_spu_count += 1;
     current_cse_send_bd_to_spu_bytes += bytes;
     current_cse_send_bd_to_spu_ms += elapsed_ms;
+}
+
+void DebugLog_RecordInputState(int player, uint32_t raw_state, uint32_t converted_state) {
+    if (!debug_log_enabled || player < 0 || player >= 2) {
+        return;
+    }
+
+    converted_state &= 0xFFFFu;
+
+    const uint32_t previous_state = input_state_initialized[player] ? last_input_converted_state[player] : 0;
+    const uint32_t changed_bits = previous_state ^ converted_state;
+    const uint32_t pressed_bits = changed_bits & converted_state;
+    const uint32_t released_bits = changed_bits & previous_state;
+
+    if (pressed_bits != 0) {
+        write_input_event(player, raw_state, converted_state, previous_state, pressed_bits, "press", 0);
+    }
+
+    if (released_bits != 0) {
+        write_input_event(player,
+                          raw_state,
+                          converted_state,
+                          previous_state,
+                          released_bits,
+                          "release",
+                          input_max_held_frames(player, released_bits));
+    }
+
+    for (int i = 0; i < 16; i++) {
+        const uint32_t bit = 1u << i;
+
+        if ((converted_state & bit) != 0) {
+            if ((previous_state & bit) == 0 || !input_state_initialized[player]) {
+                input_held_frames[player][i] = 1;
+            } else if (input_held_frames[player][i] < UINT32_MAX) {
+                input_held_frames[player][i] += 1;
+            }
+        } else {
+            input_held_frames[player][i] = 0;
+        }
+    }
+
+    last_input_converted_state[player] = converted_state;
+    input_state_initialized[player] = true;
 }
 
 void DebugLog_RecordRenderStats(const DebugRenderStats* stats) {

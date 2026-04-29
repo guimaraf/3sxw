@@ -111,5 +111,6 @@ void DebugLog_RecordSpuUpload(uint32_t bytes, double elapsed_ms);
 void DebugLog_RecordCseExecServer(double elapsed_ms);
 void DebugLog_RecordCseTsbRequest(double elapsed_ms);
 void DebugLog_RecordCseSendBdToSpu(uint32_t bytes, double elapsed_ms);
+void DebugLog_RecordInputState(int player, uint32_t raw_state, uint32_t converted_state);
 
 #endif
