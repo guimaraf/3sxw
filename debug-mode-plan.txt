@@ -35,6 +35,7 @@ Etapas concluidas:
 - Etapa 4.3: motivo de invalidacao.
 - Etapa 4.4: prototipo temporario com textura atualizavel.
 - Etapa 4.5: caminho indexado real via SDL3 texture palette.
+- Etapa 5: audio, BGM/ADX e AFS.
 
 Etapa adiada:
 - Etapa 4.6: prewarm antes da luta. Nao foi implementada porque, depois do
@@ -43,7 +44,7 @@ Etapa adiada:
   em personagens, stages, efeitos ou transicoes especificas.
 
 Proxima etapa recomendada:
-- Etapa 5: medir audio e carregamento de BGM/ADX.
+- Etapa 6: registrar input por frame de forma compacta.
 
 Validacao final da fase 4:
 - SF3.exe normal nao gera arquivos de debug e manteve comportamento esperado.
@@ -55,6 +56,29 @@ Validacao final da fase 4:
 - Nao houve stutter perceptivel nos testes finais com light profile.
 - O crash em transicao fim de luta -> resultado foi corrigido com robustez na
   fila de destruicao de texturas e validacao de handles no renderer SDL.
+
+Validacao final da etapa 5:
+- O gargalo principal de audio estava no caminho BGM_Server -> ADX_StartAfs /
+  ADX_EntryAfs -> load_file -> AFS_ReadSync, com leitura sincronizada de AFS
+  acontecendo no frame da troca de musica.
+- ADX_StartAfs e ADX_EntryAfs foram convertidos para leitura AFS assincrona.
+- ADX_ProcessTracks passou a materializar tracks pendentes quando a leitura
+  termina.
+- ADX_GetNumFiles passou a contar tracks pendentes para preservar o fluxo de
+  troca/seamless de BGM.
+- Foi adicionado um pool simples de buffers ADX para reduzir custo de alocacao
+  e spikes em ADX_EntryAfs.
+- Na validacao final com:
+  SF3.exe --debug-mode --debug-indexed-texture-path --debug-light-profile
+  o teste de 3 lutas completas, bonus do carro e inicio da quarta luta ficou
+  sem stutter perceptivel, com linha de frametime limpa.
+- A sessao final de gameplay registrou late_frames=1, limitado ao frame 0 de
+  startup, total_audio_afs_sync_reads=0, worst_audio_afs_sync_read_ms=0.000,
+  worst_adx_load_file_ms=0.000 e worst_adx_entry_afs_ms abaixo de 0.3 ms.
+- total_indexed_texture_rgba_fallbacks permaneceu em 0 no caminho indexado.
+- No teste das 67 musicas via opcoes/lista de musicas, restou 1 stutter
+  percebido. A sessao indicou candidato ligado a ADX_StartMem, abaixo do
+  threshold de late frame, sem leituras AFS sincronas.
 
 
 Descobertas tecnicas importantes
@@ -398,7 +422,7 @@ Criterios para nao encerrar uma micro etapa:
 - Ha piora perceptivel de input, audio ou frame pacing.
 
 
-Etapa 5 - PROXIMA - Medir audio e carregamento de BGM/ADX
+Etapa 5 - CONCLUIDA - Medir audio e carregamento de BGM/ADX
 ---------------------------------------------------------
 
 Objetivo:
@@ -438,6 +462,20 @@ Resultado esperado:
 - Spikes podem acontecer ao iniciar BGM ou trocar musica.
 - Se AFS_ReadSync for alto em gameplay, e candidato real para otimizar.
 
+Resultado validado:
+- AFS_ReadSync deixou de aparecer no frame de troca de BGM/ADX depois da
+  leitura assincrona.
+- total_audio_afs_sync_reads ficou em 0 nas sessoes finais analisadas.
+- worst_audio_afs_sync_read_ms ficou em 0.000 nas sessoes finais analisadas.
+- worst_adx_load_file_ms ficou em 0.000 nas sessoes finais analisadas.
+- O pool de buffers ADX reduziu os spikes de ADX_EntryAfs para menos de 0.3 ms
+  no teste final de gameplay.
+- O caminho indexado com light profile permaneceu sem stutter perceptivel no
+  teste final longo de lutas, bonus e transicoes.
+- O teste de 67 musicas ainda teve 1 stutter percebido, mas sem evidencia de
+  leitura AFS sincrona; o candidato restante ficou em ADX_StartMem e abaixo do
+  limite de late frame.
+
 Testes sugeridos:
 - Rodar Arcade e Versus.
 - Observar entrada de BGM no inicio da luta.
@@ -456,11 +494,25 @@ Objetivo:
 - Validar se input esta sendo capturado no frame esperado.
 - Evitar logs gigantes e impossiveis de analisar.
 
+Ajuste em 2026-04-28:
+- Comecar pelo input convertido no limite pos keyConvert/appCopyKeyData, pois
+  ele representa melhor o que a logica de jogo recebeu.
+- Nao registrar todos os frames. Registrar somente mudancas de estado.
+- Manter o custo baixo para o debug mode normal.
+- Nao depender de round ativo na primeira versao, porque menus, training,
+  versus e transicoes tambem podem precisar diagnostico.
+- Separar input bruto SDL do input convertido somente se a primeira medicao
+  indicar divergencia ou atraso antes da conversao.
+
 Tarefas:
 - Registrar somente mudancas de input, nao todos os frames brutos.
 - Registrar frame, jogador, estado atual, novo input, input anterior.
-- Opcionalmente registrar somente durante round ativo.
+- Registrar press, release e change.
 - Adicionar contador de frames entre press e release para botoes importantes.
+- Registrar input durante menus, training, versus e transicoes.
+- Evitar log por frame sem mudanca.
+- Opcionalmente adicionar filtro por round ativo depois que o fluxo base estiver
+  validado.
 
 Arquivos previstos:
 - src/main.c
@@ -474,7 +526,7 @@ Arquivos de log esperados:
 - summary.txt atualizado
 
 Formato esperado de input_events.csv:
-frame,player,raw_state,converted_state,changed_bits,source
+frame,player,raw_state,converted_state,previous_state,changed_bits,event_type,held_frames,source
 
 Resultado esperado:
 - Em jogo local, input pressionado deve aparecer no frame de leitura seguinte.
@@ -489,6 +541,9 @@ Testes sugeridos:
   - dash
   - hadouken
   - parry tap
+- Testar troca rapida de direcao.
+- Testar dois botoes simultaneos.
+- Testar pressionar durante menu, transicao e training.
 - Reportar:
   - se algum comando sentido no controle nao apareceu no log
   - se input apareceu duplicado
@@ -631,8 +686,8 @@ Ordem recomendada de implementacao
 3. Etapa 3: frame timing e summary basico. CONCLUIDA.
 4. Etapa 4: render stats. CONCLUIDA.
 5. Etapa 4.x: caminho experimental de textura indexada, em micro etapas. CONCLUIDA, exceto 4.6 adiada.
-6. Etapa 5: audio/ADX/AFS. PROXIMA.
-7. Etapa 6: input events compactos.
+6. Etapa 5: audio/ADX/AFS. CONCLUIDA.
+7. Etapa 6: input events compactos. PROXIMA.
 8. Etapa 8: summary completo.
 9. Etapa 7: netplay, se o foco da rodada for online.
 10. Etapa 9: padronizar roteiros de teste.

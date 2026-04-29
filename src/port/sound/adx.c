@@ -46,6 +46,7 @@ typedef struct ADXLoopInfo {
 
 typedef struct ADXTrack {
     int size;
+    size_t data_capacity;
     uint8_t* data;
     bool should_free_data_after_use;
     int used_bytes;
@@ -58,6 +59,7 @@ typedef struct ADXPendingTrack {
     bool initialized;
     int file_id;
     int size;
+    size_t data_capacity;
     int sectors;
     uint8_t* data;
     AFSHandle handle;
@@ -65,13 +67,20 @@ typedef struct ADXPendingTrack {
     Uint64 request_start_ns;
 } ADXPendingTrack;
 
+typedef struct ADXBufferPoolItem {
+    uint8_t* data;
+    size_t capacity;
+} ADXBufferPoolItem;
+
 static SDL_AudioStream* stream = NULL;
 static ADXTrack tracks[TRACKS_MAX] = { 0 };
 static ADXPendingTrack pending_tracks[TRACKS_MAX] = { 0 };
+static ADXBufferPoolItem buffer_pool[TRACKS_MAX] = { 0 };
 static int num_tracks = 0;
 static int first_track_index = 0;
 static int num_pending_tracks = 0;
 static int first_pending_track_index = 0;
+static int buffer_pool_count = 0;
 static bool has_tracks = false;
 
 static int stream_data_needed() {
@@ -122,6 +131,64 @@ static void pipeline_destroy(ADXDecoderPipeline* pipeline) {
     swr_free(&pipeline->swr);
     avcodec_free_context(&pipeline->context);
     av_parser_close(pipeline->parser_context);
+}
+
+static uint8_t* acquire_buffer(size_t size, size_t* capacity) {
+    int best_index = -1;
+    size_t best_capacity = 0;
+
+    for (int i = 0; i < buffer_pool_count; i++) {
+        const size_t candidate_capacity = buffer_pool[i].capacity;
+
+        if (candidate_capacity < size) {
+            continue;
+        }
+
+        if (best_index == -1 || candidate_capacity < best_capacity) {
+            best_index = i;
+            best_capacity = candidate_capacity;
+        }
+    }
+
+    if (best_index >= 0) {
+        uint8_t* data = buffer_pool[best_index].data;
+        *capacity = buffer_pool[best_index].capacity;
+
+        for (int i = best_index; i < buffer_pool_count - 1; i++) {
+            buffer_pool[i] = buffer_pool[i + 1];
+        }
+
+        buffer_pool_count -= 1;
+        SDL_zero(buffer_pool[buffer_pool_count]);
+        return data;
+    }
+
+    *capacity = size;
+    return malloc(size);
+}
+
+static void release_buffer(uint8_t* data, size_t capacity) {
+    if (data == NULL) {
+        return;
+    }
+
+    if (buffer_pool_count >= SDL_arraysize(buffer_pool)) {
+        free(data);
+        return;
+    }
+
+    buffer_pool[buffer_pool_count].data = data;
+    buffer_pool[buffer_pool_count].capacity = capacity;
+    buffer_pool_count += 1;
+}
+
+static void free_buffer_pool() {
+    for (int i = 0; i < buffer_pool_count; i++) {
+        free(buffer_pool[i].data);
+    }
+
+    buffer_pool_count = 0;
+    SDL_zeroa(buffer_pool);
 }
 
 static void* load_file(int file_id, int* size) {
@@ -339,10 +406,12 @@ static void process_track(ADXTrack* track) {
 static void track_init_from_data(ADXTrack* track,
                                  void* buf,
                                  size_t buf_size,
+                                 size_t data_capacity,
                                  bool should_free_data_after_use,
                                  bool looping_allowed) {
     track->data = buf;
     track->size = buf_size;
+    track->data_capacity = data_capacity;
     track->should_free_data_after_use = should_free_data_after_use;
     track->used_bytes = 0;
     pipeline_init(&track->pipeline);
@@ -362,9 +431,9 @@ static void track_init(ADXTrack* track, int file_id, void* buf, size_t buf_size,
     if (file_id != -1) {
         int size = 0;
         void* data = load_file(file_id, &size);
-        track_init_from_data(track, data, size, true, looping_allowed);
+        track_init_from_data(track, data, size, size, true, looping_allowed);
     } else {
-        track_init_from_data(track, buf, buf_size, false, looping_allowed);
+        track_init_from_data(track, buf, buf_size, buf_size, false, looping_allowed);
     }
 }
 
@@ -373,7 +442,7 @@ static void track_destroy(ADXTrack* track) {
     loop_info_destroy(&track->loop_info);
 
     if (track->should_free_data_after_use) {
-        free(track->data);
+        release_buffer(track->data, track->data_capacity);
     }
 
     SDL_zerop(track);
@@ -439,7 +508,7 @@ static void pending_track_destroy(ADXPendingTrack* pending_track) {
         AFS_Close(pending_track->handle);
     }
 
-    free(pending_track->data);
+    release_buffer(pending_track->data, pending_track->data_capacity);
     SDL_zerop(pending_track);
 }
 
@@ -460,7 +529,8 @@ static void queue_afs_track(int file_id, bool looping_allowed) {
 
     const unsigned int file_size = fsGetFileSize(file_id);
     const size_t buff_size = (file_size + 2048 - 1) & ~(2048 - 1);
-    uint8_t* data = malloc(buff_size);
+    size_t data_capacity = 0;
+    uint8_t* data = acquire_buffer(buff_size, &data_capacity);
 
     if (data == NULL) {
         return;
@@ -469,7 +539,7 @@ static void queue_afs_track(int file_id, bool looping_allowed) {
     AFSHandle handle = AFS_Open(file_id);
 
     if (handle == AFS_NONE) {
-        free(data);
+        release_buffer(data, data_capacity);
         return;
     }
 
@@ -477,12 +547,13 @@ static void queue_afs_track(int file_id, bool looping_allowed) {
 
     if (pending_track == NULL) {
         AFS_Close(handle);
-        free(data);
+        release_buffer(data, data_capacity);
         return;
     }
 
     pending_track->file_id = file_id;
     pending_track->size = file_size;
+    pending_track->data_capacity = data_capacity;
     pending_track->sectors = fsCalSectorSize(file_size);
     pending_track->data = data;
     pending_track->looping_allowed = looping_allowed;
@@ -495,6 +566,7 @@ static void queue_afs_track(int file_id, bool looping_allowed) {
 static bool finish_pending_track(ADXPendingTrack* pending_track) {
     uint8_t* data = pending_track->data;
     const int size = pending_track->size;
+    const size_t data_capacity = pending_track->data_capacity;
     const bool looping_allowed = pending_track->looping_allowed;
 
     pending_track->data = NULL;
@@ -505,11 +577,11 @@ static bool finish_pending_track(ADXPendingTrack* pending_track) {
     ADXTrack* track = alloc_track();
 
     if (track == NULL) {
-        free(data);
+        release_buffer(data, data_capacity);
         return false;
     }
 
-    track_init_from_data(track, data, size, true, looping_allowed);
+    track_init_from_data(track, data, size, data_capacity, true, looping_allowed);
     return true;
 }
 
@@ -569,6 +641,7 @@ void ADX_Init() {
 void ADX_Exit() {
     ADX_Stop();
     SDL_DestroyAudioStream(stream);
+    free_buffer_pool();
 }
 
 void ADX_Stop() {
