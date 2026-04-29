@@ -22,7 +22,7 @@ include_directories(
 # Source collection
 # ======================================
 
-file(GLOB_RECURSE GAME_SRC src/*.c)
+file(GLOB_RECURSE GAME_SRC CONFIGURE_DEPENDS src/*.c)
 
 if(WIN32)
     list(APPEND GAME_SRC "${CMAKE_SOURCE_DIR}/src/sf3.rc")

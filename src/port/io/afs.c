@@ -1,5 +1,6 @@
 #include "port/io/afs.h"
 #include "common.h"
+#include "port/debug/debug_log.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
 
@@ -303,6 +304,7 @@ void AFS_ReadSync(AFSHandle handle, int sectors, void* buf) {
     printf("📂 %d: read sync\n", handle);
 #endif
 
+    const Uint64 start_ns = DebugLog_IsEnabled() ? SDL_GetTicksNS() : 0;
     AFS_Read(handle, sectors, buf);
 
     SDL_AsyncIOOutcome outcome;
@@ -315,6 +317,12 @@ void AFS_ReadSync(AFSHandle handle, int sectors, void* buf) {
         if (request->index == handle) {
             break;
         }
+    }
+
+    if (DebugLog_IsEnabled()) {
+        const ReadRequest* request = &requests[handle];
+        DebugLog_RecordAfsSyncRead(
+            request->file_num, sectors, (uint32_t)(sectors * 2048), (double)(SDL_GetTicksNS() - start_ns) / 1e6);
     }
 }
 

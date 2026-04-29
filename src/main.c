@@ -3,7 +3,9 @@
 #include "common.h"
 #include "configuration.h"
 #include "netplay/netplay.h"
+#include "port/debug/debug_log.h"
 #include "port/sdl/sdl_app.h"
+#include "port/sdl/sdl_game_renderer.h"
 #include "sf33rd/AcrSDK/common/mlPAD.h"
 #include "sf33rd/AcrSDK/ps2/flps2debug.h"
 #include "sf33rd/AcrSDK/ps2/flps2etc.h"
@@ -71,6 +73,9 @@ static u8 dctex_linear_mem[0x800];
 static u8 texcash_melt_buffer_mem[0x1000];
 static u8 tpu_free_mem[0x2000];
 static MainPhase phase = MAIN_PHASE_INIT;
+static int main_argc = 0;
+static char* main_command_line = NULL;
+static DebugTaskStats* debug_current_task_stats = NULL;
 
 static u8* mppMalloc(u32 size) {
     return flAllocMemory(size);
@@ -166,6 +171,7 @@ static void init_windows_console() {
 
 static void initialize_game() {
     SDLApp_FullInit();
+    SDLApp_WriteDebugSessionInfo();
 
 #if _WIN32 && DEBUG
     init_windows_console();
@@ -178,6 +184,10 @@ static void initialize_game() {
 
 static void cleanup() {
     AFS_Finish();
+    SDLGameRenderer_WriteDebugTextureHandleStats();
+    DebugLog_Shutdown();
+    SDL_free(main_command_line);
+    main_command_line = NULL;
     SDLApp_Quit();
 }
 
@@ -199,10 +209,28 @@ static void cpLoopTask() {
 
     for (int i = 0; i < 11; i++) {
         struct _TASK* task_ptr = &task[i];
+        Uint64 task_start_ns = 0;
+
+        if (debug_current_task_stats != NULL) {
+            debug_current_task_stats->condition[i] = task_ptr->condition;
+            debug_current_task_stats->r_no[i][0] = task_ptr->r_no[0];
+            debug_current_task_stats->r_no[i][1] = task_ptr->r_no[1];
+            debug_current_task_stats->r_no[i][2] = task_ptr->r_no[2];
+            debug_current_task_stats->r_no[i][3] = task_ptr->r_no[3];
+        }
 
         switch (task_ptr->condition) {
         case 1:
+            if (debug_current_task_stats != NULL) {
+                task_start_ns = SDL_GetTicksNS();
+            }
+
             task_ptr->func_adrs(task_ptr);
+
+            if (debug_current_task_stats != NULL) {
+                debug_current_task_stats->task_ms[i] = (double)(SDL_GetTicksNS() - task_start_ns) / 1e6;
+            }
+
             break;
 
         case 2:
@@ -313,8 +341,20 @@ static void configure_slow_timer() {
 }
 #endif
 
-static void game_step_0() {
+static Uint64 debug_timing_start(const DebugStepStats* stats) {
+    return stats != NULL ? SDL_GetTicksNS() : 0;
+}
+
+static double debug_timing_elapsed(Uint64 start_ns) {
+    return (double)(SDL_GetTicksNS() - start_ns) / 1e6;
+}
+
+static void game_step_0(DebugStepStats* step_stats, DebugTaskStats* task_stats) {
+    Uint64 step_start_ns = debug_timing_start(step_stats);
     AFS_RunServer();
+    if (step_stats != NULL) {
+        step_stats->afs_run_server_ms = debug_timing_elapsed(step_start_ns);
+    }
 
     flSetRenderState(FLRENDER_BACKCOLOR, 0xFF000000);
 
@@ -324,18 +364,37 @@ static void game_step_0() {
     }
 #endif
 
+    step_start_ns = debug_timing_start(step_stats);
     appSetupTempPriority();
+    if (step_stats != NULL) {
+        step_stats->setup_temp_priority_ms = debug_timing_elapsed(step_start_ns);
+    }
+
+    step_start_ns = debug_timing_start(step_stats);
     flPADGetALL();
+    if (step_stats != NULL) {
+        step_stats->pad_get_all_ms = debug_timing_elapsed(step_start_ns);
+    }
+
+    step_start_ns = debug_timing_start(step_stats);
     keyConvert();
+    if (step_stats != NULL) {
+        step_stats->key_convert_ms = debug_timing_elapsed(step_start_ns);
+    }
 
 #if DEBUG
+    step_start_ns = debug_timing_start(step_stats);
     if (configuration.test.enabled) {
         TestRunner_Prologue();
     }
 
     configure_slow_timer();
+    if (step_stats != NULL) {
+        step_stats->test_prologue_ms = debug_timing_elapsed(step_start_ns);
+    }
 #endif
 
+    step_start_ns = debug_timing_start(step_stats);
     if ((Play_Mode != 3 && Play_Mode != 1) || (Game_pause != 0x81)) {
         p1sw_1 = p1sw_0;
         p2sw_1 = p2sw_0;
@@ -354,36 +413,111 @@ static void game_step_0() {
     }
 
     appCopyKeyData();
+    DebugLog_RecordInputState(0, io_w.data[0].sw, PLsw[0][0]);
+    DebugLog_RecordInputState(1, io_w.data[1].sw, PLsw[1][0]);
+    if (step_stats != NULL) {
+        step_stats->input_copy_ms = debug_timing_elapsed(step_start_ns);
+    }
 
     mpp_w.inGame = false;
+
+    const Uint64 game_main_start_ns = debug_timing_start(step_stats);
 
     if (Netplay_GetSessionState() != NETPLAY_SESSION_IDLE) {
         Netplay_Run();
         // Flush the 2D polygon buffer each frame when the game's normal render
         // loop isn't running, preventing the 100-item limit from overflowing.
+        step_start_ns = debug_timing_start(step_stats);
         njdp2d_draw();
+        if (step_stats != NULL) {
+            step_stats->njdp2d_draw_ms = debug_timing_elapsed(step_start_ns);
+        }
     } else {
+        step_start_ns = debug_timing_start(step_stats);
+        DebugTaskStats* previous_task_stats = debug_current_task_stats;
+        debug_current_task_stats = task_stats;
         njUserMain();
+        debug_current_task_stats = previous_task_stats;
+        if (step_stats != NULL) {
+            step_stats->nj_user_main_ms = debug_timing_elapsed(step_start_ns);
+        }
+
+        step_start_ns = debug_timing_start(step_stats);
         seqsBeforeProcess();
+        if (step_stats != NULL) {
+            step_stats->seqs_before_process_ms = debug_timing_elapsed(step_start_ns);
+        }
+
+        step_start_ns = debug_timing_start(step_stats);
         njdp2d_draw();
+        if (step_stats != NULL) {
+            step_stats->njdp2d_draw_ms = debug_timing_elapsed(step_start_ns);
+        }
+
+        step_start_ns = debug_timing_start(step_stats);
         seqsAfterProcess();
+        if (step_stats != NULL) {
+            step_stats->seqs_after_process_ms = debug_timing_elapsed(step_start_ns);
+        }
+
+        step_start_ns = debug_timing_start(step_stats);
         Netplay_TickMatchmaking();
         Netplay_TickDirectP2P();
+        if (step_stats != NULL) {
+            step_stats->netplay_tick_ms = debug_timing_elapsed(step_start_ns);
+        }
     }
 
+    if (step_stats != NULL) {
+        step_stats->game_main_ms = debug_timing_elapsed(game_main_start_ns);
+    }
+
+    step_start_ns = debug_timing_start(step_stats);
     KnjFlush();
+    if (step_stats != NULL) {
+        step_stats->knj_flush_ms = debug_timing_elapsed(step_start_ns);
+    }
+
+    step_start_ns = debug_timing_start(step_stats);
     disp_effect_work();
+    if (step_stats != NULL) {
+        step_stats->disp_effect_work_ms = debug_timing_elapsed(step_start_ns);
+    }
+
+    step_start_ns = debug_timing_start(step_stats);
     flFlip(0);
+    if (step_stats != NULL) {
+        step_stats->fl_flip_ms = debug_timing_elapsed(step_start_ns);
+    }
 }
 
-static void game_step_1() {
+static void game_step_1(DebugStepStats* step_stats) {
     Interrupt_Timer += 1;
     Record_Timer += 1;
 
+    Uint64 step_start_ns = debug_timing_start(step_stats);
     Scrn_Renew();
+    if (step_stats != NULL) {
+        step_stats->scrn_renew_ms = debug_timing_elapsed(step_start_ns);
+    }
+
+    step_start_ns = debug_timing_start(step_stats);
     Irl_Family();
+    if (step_stats != NULL) {
+        step_stats->irl_family_ms = debug_timing_elapsed(step_start_ns);
+    }
+
+    step_start_ns = debug_timing_start(step_stats);
     Irl_Scrn();
+    if (step_stats != NULL) {
+        step_stats->irl_scrn_ms = debug_timing_elapsed(step_start_ns);
+    }
+
+    step_start_ns = debug_timing_start(step_stats);
     BGM_Server();
+    if (step_stats != NULL) {
+        step_stats->bgm_server_ms = debug_timing_elapsed(step_start_ns);
+    }
 
 #if DEBUG
     if (configuration.test.enabled) {
@@ -405,13 +539,30 @@ static bool sdl_poll_helper() {
     return continue_running;
 }
 
+static double elapsed_ms(Uint64 start_ns, Uint64 end_ns) {
+    return (double)(end_ns - start_ns) / 1e6;
+}
+
 static int loop() {
     bool is_running = true;
+    Uint64 debug_frame = 0;
+    const double late_frame_threshold_ms = (1000.0 / TARGET_FPS) + 1.0;
 
     while (is_running) {
         switch (phase) {
         case MAIN_PHASE_INIT:
             SDLApp_PreInit();
+            SDLGameRenderer_SetDebugIndexedTexturePathEnabled(configuration.debug_runtime.enabled &&
+                                                              configuration.debug_runtime.indexed_texture_path_enabled);
+            DebugLog_Init(configuration.debug_runtime.enabled,
+                          configuration.debug_runtime.light_profile_enabled,
+                          main_argc,
+                          main_command_line);
+            DebugLog_PrintSession("debug_indexed_texture_path=%d\n",
+                                  configuration.debug_runtime.indexed_texture_path_enabled);
+            DebugLog_PrintSession("debug_light_profile=%d\n", configuration.debug_runtime.light_profile_enabled);
+            DebugLog_PrintSession("target_frame_ms=%.3f\n", 1000.0 / TARGET_FPS);
+            DebugLog_PrintSession("late_frame_threshold_ms=%.3f\n", late_frame_threshold_ms);
 
             if (Resources_Check()) {
                 initialize_game();
@@ -441,16 +592,119 @@ static int loop() {
             break;
 
         case MAIN_PHASE_INITIALIZED:
+            if (!DebugLog_IsEnabled()) {
+                is_running = SDLApp_PollEvents();
+
+                if (!is_running) {
+                    break;
+                }
+
+                SDLApp_BeginFrame();
+                game_step_0(NULL, NULL);
+                SDLApp_EndFrame(NULL);
+                game_step_1(NULL);
+                break;
+            }
+
+            const Uint64 frame_start_ns = SDL_GetTicksNS();
+
+            const Uint64 poll_start_ns = frame_start_ns;
             is_running = SDLApp_PollEvents();
+            const Uint64 poll_end_ns = SDL_GetTicksNS();
 
             if (!is_running) {
                 break;
             }
 
+            const Uint64 begin_start_ns = poll_end_ns;
             SDLApp_BeginFrame();
-            game_step_0();
-            SDLApp_EndFrame();
-            game_step_1();
+            const Uint64 begin_end_ns = SDL_GetTicksNS();
+
+            const Uint64 game0_start_ns = begin_end_ns;
+            DebugStepStats step_stats = { .frame = debug_frame };
+            DebugTaskStats task_stats = { .frame = debug_frame };
+            DebugLog_BeginFrame(debug_frame);
+
+            game_step_0(&step_stats, &task_stats);
+            const Uint64 game0_end_ns = SDL_GetTicksNS();
+
+            SDLAppFrameTiming app_frame_timing = { 0 };
+            const Uint64 end_start_ns = game0_end_ns;
+            SDLApp_EndFrame(&app_frame_timing);
+            const Uint64 end_end_ns = SDL_GetTicksNS();
+
+            const Uint64 game1_start_ns = end_end_ns;
+            game_step_1(&step_stats);
+            const Uint64 frame_end_ns = SDL_GetTicksNS();
+
+            double end_ms = elapsed_ms(end_start_ns, end_end_ns) - app_frame_timing.sleep_ms;
+
+            if (end_ms < 0.0) {
+                end_ms = 0.0;
+            }
+
+            const double total_ms = elapsed_ms(frame_start_ns, frame_end_ns);
+            DebugFrameTiming frame_timing = {
+                .frame = debug_frame,
+                .total_ms = total_ms,
+                .poll_ms = elapsed_ms(poll_start_ns, poll_end_ns),
+                .begin_ms = elapsed_ms(begin_start_ns, begin_end_ns),
+                .game0_ms = elapsed_ms(game0_start_ns, game0_end_ns),
+                .end_ms = end_ms,
+                .game1_ms = elapsed_ms(game1_start_ns, frame_end_ns),
+                .sleep_ms = app_frame_timing.sleep_ms,
+                .late_flag = total_ms > late_frame_threshold_ms ? 1 : 0,
+            };
+
+            DebugLog_RecordFrameTiming(&frame_timing);
+            DebugLog_RecordStepStats(&step_stats);
+            DebugLog_RecordTaskStats(&task_stats);
+
+            DebugRenderStats render_stats = {
+                .frame = debug_frame,
+                .render_tasks = app_frame_timing.render_stats.render_tasks,
+                .geometry_calls = app_frame_timing.render_stats.geometry_calls,
+                .texture_cache_misses = app_frame_timing.render_stats.texture_cache_misses,
+                .texture_cache_misses_first_use = app_frame_timing.render_stats.texture_cache_misses_first_use,
+                .texture_cache_misses_after_palette_unlock =
+                    app_frame_timing.render_stats.texture_cache_misses_after_palette_unlock,
+                .texture_cache_misses_after_texture_unlock =
+                    app_frame_timing.render_stats.texture_cache_misses_after_texture_unlock,
+                .texture_cache_misses_after_release = app_frame_timing.render_stats.texture_cache_misses_after_release,
+                .texture_cache_misses_unknown = app_frame_timing.render_stats.texture_cache_misses_unknown,
+                .palette_unlocks = app_frame_timing.render_stats.palette_unlocks,
+                .texture_unlocks = app_frame_timing.render_stats.texture_unlocks,
+                .palette_cache_invalidated_textures =
+                    app_frame_timing.render_stats.palette_cache_invalidated_textures,
+                .texture_cache_invalidated_textures =
+                    app_frame_timing.render_stats.texture_cache_invalidated_textures,
+                .release_cache_invalidated_textures =
+                    app_frame_timing.render_stats.release_cache_invalidated_textures,
+                .indexed_texture_updates = app_frame_timing.render_stats.indexed_texture_updates,
+                .indexed_texture_update_pixels = app_frame_timing.render_stats.indexed_texture_update_pixels,
+                .indexed_texture_update_ms = app_frame_timing.render_stats.indexed_texture_update_ms,
+                .indexed_palette_updates = app_frame_timing.render_stats.indexed_palette_updates,
+                .indexed_palette_update_ms = app_frame_timing.render_stats.indexed_palette_update_ms,
+                .indexed_texture_rgba_fallbacks = app_frame_timing.render_stats.indexed_texture_rgba_fallbacks,
+                .render_sort_ms = app_frame_timing.render_stats.render_sort_ms,
+                .render_geometry_ms = app_frame_timing.render_stats.render_geometry_ms,
+                .adx_process_ms = app_frame_timing.adx_process_ms,
+                .netplay_screen_render_ms = app_frame_timing.netplay_screen_render_ms,
+                .netstats_render_ms = app_frame_timing.netstats_render_ms,
+                .game_renderer_render_ms = app_frame_timing.game_renderer_render_ms,
+                .screenshot_ms = app_frame_timing.screenshot_ms,
+                .screen_copy_ms = app_frame_timing.screen_copy_ms,
+                .debug_text_ms = app_frame_timing.debug_text_ms,
+                .present_ms = app_frame_timing.present_ms,
+                .cleanup_ms = app_frame_timing.cleanup_ms,
+                .cursor_ms = app_frame_timing.cursor_ms,
+                .pacing_ms = app_frame_timing.pacing_ms,
+                .pacing_overhead_ms = app_frame_timing.pacing_overhead_ms,
+                .sleep_overrun_ms = app_frame_timing.sleep_overrun_ms,
+            };
+
+            DebugLog_RecordRenderStats(&render_stats);
+            debug_frame += 1;
             break;
         }
     }
@@ -460,6 +714,19 @@ static int loop() {
 }
 
 int main(int argc, const char* argv[]) {
+    main_argc = argc;
+
+    for (int i = 0; i < argc; i++) {
+        char* next_command_line = NULL;
+        SDL_asprintf(&next_command_line,
+                     "%s%s%s",
+                     main_command_line == NULL ? "" : main_command_line,
+                     i == 0 ? "" : " ",
+                     argv[i] != NULL ? argv[i] : "");
+        SDL_free(main_command_line);
+        main_command_line = next_command_line;
+    }
+
     read_args(argc, argv, &configuration);
     return loop();
 }

@@ -1,0 +1,815 @@
+# Debug mode
+
+This document explains how to enable the runtime debug mode, which commands are
+available, what each command does, where logs are written, and how to report a
+test session.
+
+The debug mode is intended to diagnose stutter, frame pacing, rendering, audio,
+BGM/ADX loading, I/O, and input without requiring a separate executable.
+
+## How to run
+
+Open a terminal in the folder that contains `SF3.exe`.
+
+Windows example:
+
+```bat
+"SF3.exe" --debug-mode
+```
+
+You can also add the parameters to a Windows shortcut. In the shortcut
+`Target` field, keep the executable path quoted and add the parameters after
+it:
+
+```text
+"SF3.exe" --debug-mode
+```
+
+To change the diagnostic mode, keep the same executable path and change only
+the parameters after `.exe`.
+
+## Main commands
+
+### Normal game
+
+```bat
+SF3.exe
+```
+
+Runs the game normally.
+
+No debug session is created, no CSV files are written, and no extra metrics are
+collected. Use this mode for regular play.
+
+### Base debug
+
+```bat
+SF3.exe --debug-mode
+```
+
+Enables the main diagnostic mode.
+
+This is the recommended command for validating normal gameplay, frame pacing,
+audio, input, and transitions. It keeps the normal rendering path and writes
+logs under `data/debug/`.
+
+Use it to answer questions such as:
+
+- Was there noticeable stutter?
+- What was the worst frame?
+- Did the stutter match audio, I/O, rendering, or input?
+- Was input recorded on the expected frame?
+- Did BGM/ADX or AFS block the frame again?
+
+### Experimental indexed texture path
+
+```bat
+SF3.exe --debug-mode --debug-indexed-texture-path
+```
+
+Enables debug mode and the experimental SDL3 indexed texture path using texture
+palettes.
+
+This mode uses indexed textures plus separate palettes when the source format
+allows it. Its purpose is to compare the normal rendering path against the
+palettized path.
+
+Use it only for rendering, performance, and visual regression tests. It is not
+needed for regular play.
+
+### Indexed texture path with light profile
+
+```bat
+SF3.exe --debug-mode --debug-indexed-texture-path --debug-light-profile
+```
+
+Enables the experimental indexed path with reduced heavy logging.
+
+This is the preferred command for longer gameplay validation with less debug
+overhead. It keeps the main files, but disables large CSVs such as
+`render_stats.csv`, `step_stats.csv`, and `task_stats.csv`.
+
+Use it for real gameplay tests: complete matches, bonus stages, transitions,
+BGM changes, and heavy effects.
+
+## Log location
+
+Each run with `--debug-mode` creates its own session folder:
+
+```text
+data/debug/session-YYYYMMDD-HHMMSS/
+```
+
+Example:
+
+```text
+data/debug/session-20260428-231228/
+```
+
+When reporting a test, always include the generated session folder.
+
+## Generated files
+
+### `session.txt`
+
+Basic session information:
+
+- session path;
+- date and time;
+- command-line arguments;
+- relevant debug settings.
+
+Use it to confirm that the game was launched with the expected parameters.
+
+### `summary.txt`
+
+The most important file for quick reporting.
+
+It contains the main session numbers:
+
+- frame count;
+- average frame time;
+- p95/p99 frame time;
+- worst frame;
+- late frame count;
+- worst rendering timings;
+- worst audio/ADX/AFS timings;
+- input totals;
+- paths to generated CSV files.
+
+In most cases, this is the first file to inspect.
+
+### `frame_timing.csv`
+
+Per-frame timing data.
+
+Main columns:
+
+- `frame`;
+- `total_ms`;
+- `poll_ms`;
+- `begin_ms`;
+- `game0_ms`;
+- `end_ms`;
+- `game1_ms`;
+- `sleep_ms`;
+- `late_flag`.
+
+Use it to find the exact frame where a stutter or late frame happened.
+
+### `event_log.csv`
+
+Compact log of relevant events.
+
+It may include:
+
+- late frames;
+- rendering spikes;
+- audio spikes;
+- texture cache misses;
+- BGM start/change events;
+- AFS reads;
+- indexed texture fallback events;
+- other aggregated events.
+
+Use it to match a bad frame with a likely cause.
+
+### `audio_stats.csv`
+
+Per-frame audio, BGM/ADX, and AFS metrics.
+
+Use it to investigate:
+
+- `ADX_ProcessTracks`;
+- `ADX_StartMem`;
+- `ADX_EntryAfs`;
+- `ADX_StartAfs`;
+- synchronous AFS reads;
+- ADX audio queue;
+- music changes.
+
+After the Stage 5 optimization, the expected results are:
+
+- `total_audio_afs_sync_reads=0`;
+- `worst_audio_afs_sync_read_ms=0.000`;
+- `worst_adx_load_file_ms=0.000`;
+- no noticeable stutter when changing BGM.
+
+### `input_events.csv`
+
+Compact converted-input log.
+
+It records only state changes, not every frame.
+
+Columns:
+
+```text
+frame,player,raw_state,converted_state,previous_state,changed_bits,event_type,held_frames,source
+```
+
+Expected event types:
+
+- `press`;
+- `release`.
+
+Use it to confirm:
+
+- whether a button appeared in the log;
+- which frame received the input;
+- how long the input was held;
+- whether input was duplicated;
+- whether P1/P2 were recorded correctly.
+
+Simultaneous changes, such as releasing one direction and pressing another on
+the same frame, may create two rows on the same frame: one `release` and one
+`press`. This is expected.
+
+### `render_stats.csv`
+
+Generated by full `--debug-mode`.
+
+Contains detailed rendering metrics:
+
+- render tasks;
+- geometry calls;
+- texture cache misses;
+- invalidations;
+- indexed texture updates;
+- RGBA fallback;
+- sort/render geometry timing.
+
+Use it when a stutter may be rendering-related or when comparing the normal
+path with the indexed path.
+
+### `step_stats.csv`
+
+Generated by full `--debug-mode`.
+
+Measures internal main loop costs:
+
+- `AFS_RunServer`;
+- `flPADGetALL`;
+- `keyConvert`;
+- input copy;
+- `njUserMain`;
+- BGM server;
+- SPU/CSE.
+
+Use it to identify which part of a frame became expensive.
+
+### `task_stats.csv`
+
+Generated by full `--debug-mode`.
+
+Records state and cost for the main game tasks.
+
+Use it to relate a spike to a menu, transition, match, bonus stage, result
+screen, or another internal state.
+
+### Texture/palette handle files
+
+These may appear when the indexed path is enabled:
+
+- `texture_handle_stats.csv`;
+- `palette_handle_stats.csv`;
+- `texture_palette_handle_stats.csv`.
+
+Use them to diagnose texture and palette handle lifetime, usage, and
+validation.
+
+## Which command to use
+
+### Confirm that normal play does not create debug files
+
+```bat
+SF3.exe
+```
+
+Confirm that no new `data/debug/session-*` folder was created.
+
+### Investigate general stutter
+
+```bat
+SF3.exe --debug-mode
+```
+
+Use it for menus, Training, Arcade, bonus stages, or the music list.
+
+### Investigate rendering on the normal path
+
+```bat
+SF3.exe --debug-mode
+```
+
+Inspect `render_stats.csv`, `step_stats.csv`, `task_stats.csv`,
+`frame_timing.csv`, and `event_log.csv`.
+
+### Validate the indexed path with less overhead
+
+```bat
+SF3.exe --debug-mode --debug-indexed-texture-path --debug-light-profile
+```
+
+Use it for real gameplay, complete matches, bonus stages, and transitions.
+
+### Compare normal path and full indexed path
+
+Run one session with:
+
+```bat
+SF3.exe --debug-mode
+```
+
+Then run another session with:
+
+```bat
+SF3.exe --debug-mode --debug-indexed-texture-path
+```
+
+Compare `summary.txt`, `frame_timing.csv`, `render_stats.csv`, and
+`event_log.csv`.
+
+## Recommended manual test
+
+For an important validation pass, use a short and focused session:
+
+1. Launch the game with the chosen command.
+2. Enter menus/options.
+3. Test the music list if the focus is BGM/ADX.
+4. Enter Training.
+5. Test directions, buttons, dash, specials, supers, and parry.
+6. Play Arcade for at least 2 or 3 complete matches.
+7. Test round transitions, result screen, and next match startup.
+8. Test the car bonus stage when relevant.
+9. Close the game normally.
+10. Write down whether there was noticeable stutter and the approximate moment.
+
+## How to report a session
+
+When reporting a test, include:
+
+- command used;
+- session folder;
+- approximate duration;
+- tested mode: menu, Training, Arcade, bonus stage, music list;
+- whether there was noticeable stutter;
+- approximate stutter moment;
+- whether audio delayed, cut out, or went silent;
+- whether input felt delayed, duplicated, or lost.
+
+Example:
+
+```text
+Command:
+SF3.exe --debug-mode
+
+Session:
+data/debug/session-20260428-230829
+
+Test:
+Training + Versus + short Arcade run.
+
+Result:
+No noticeable stutter. Input normal. Audio normal.
+```
+
+## Quick interpretation
+
+### Good signs
+
+- Low `late_frames`.
+- `p99_frame_ms` close to the target frame time.
+- `total_audio_afs_sync_reads=0`.
+- `worst_audio_afs_sync_read_ms=0.000`.
+- `total_indexed_texture_rgba_fallbacks=0` on the indexed path.
+- Small `input_events.csv` with expected events.
+- No new `error.log`.
+
+### Warning signs
+
+- Noticeable stutter during gameplay.
+- High `late_frames` outside frame 0.
+- Repeated spikes in `event_log.csv`.
+- `AFS_ReadSync` appearing during gameplay.
+- `worst_adx_load_file_ms` above zero when changing BGM.
+- `input_events.csv` growing too much in a short session.
+- Input felt on the controller but missing from `input_events.csv`.
+- Audio cutting out, delaying, or going silent.
+
+## Important notes
+
+- The correct parameter is `--debug-mode`, with two hyphens.
+- Do not use the other debug parameters without `--debug-mode`.
+- Normal `SF3.exe` should not generate debug files.
+- The indexed path is experimental and should be used only for validation.
+- `--debug-light-profile` reduces heavy logs for gameplay tests.
+- Netplay is outside the current scope of this fork.
+
+---
+
+# Modo debug
+
+Este documento explica como ativar o modo de diagnostico em runtime, quais
+comandos existem, o que cada um faz, onde os logs sao gravados e como reportar
+uma sessao de teste.
+
+O debug mode foi criado para investigar stutter, frame pacing, renderizacao,
+audio, carregamento de BGM/ADX, I/O e input sem precisar manter uma versao
+separada do executavel.
+
+## Como executar
+
+Abra o terminal na pasta onde esta o `SF3.exe`.
+
+Exemplo no Windows:
+
+```bat
+"SF3.exe" --debug-mode
+```
+
+Tambem e possivel colocar os parametros no atalho do Windows. No campo
+`Destino`, mantenha o caminho do executavel entre aspas e adicione os
+parametros depois dele:
+
+```text
+"SF3.exe" --debug-mode
+```
+
+Para trocar o tipo de diagnostico, mantenha o mesmo caminho do executavel e
+altere apenas os parametros depois do `.exe`.
+
+## Comandos principais
+
+### Jogo normal
+
+```bat
+SF3.exe
+```
+
+Executa o jogo normalmente.
+
+Nenhuma sessao de debug e criada, nenhum CSV e gravado e nenhuma metrica extra
+e coletada. Use este modo para jogar normalmente.
+
+### Debug base
+
+```bat
+SF3.exe --debug-mode
+```
+
+Ativa o modo de diagnostico principal.
+
+Este e o comando recomendado para validar gameplay normal, frame pacing, audio,
+input e transicoes. Ele mantem o caminho de renderizacao normal do jogo e grava
+logs em `data/debug/`.
+
+Use para responder perguntas como:
+
+- Houve stutter perceptivel?
+- Qual foi o pior frame?
+- O stutter coincidiu com audio, I/O, renderizacao ou input?
+- O input foi registrado no frame esperado?
+- BGM/ADX ou AFS voltou a bloquear o frame?
+
+### Caminho experimental de textura indexada
+
+```bat
+SF3.exe --debug-mode --debug-indexed-texture-path
+```
+
+Ativa o debug mode e tambem o caminho experimental de textura indexada via SDL3
+texture palette.
+
+Este modo usa textura indexada + paleta separada quando o formato permite. O
+objetivo e comparar o caminho normal de renderizacao com o caminho paletizado.
+
+Use apenas para testes de renderizacao, performance e regressao visual. Nao e
+necessario para jogar normalmente.
+
+### Caminho indexado com perfil leve
+
+```bat
+SF3.exe --debug-mode --debug-indexed-texture-path --debug-light-profile
+```
+
+Ativa o caminho indexado experimental com menos logs pesados.
+
+Este e o comando preferido para validacao longa de gameplay com menor custo de
+debug. Ele mantem os arquivos principais, mas desativa CSVs grandes como
+`render_stats.csv`, `step_stats.csv` e `task_stats.csv`.
+
+Use para testes reais de gameplay: lutas completas, bonus, transicoes, troca de
+BGM e efeitos pesados.
+
+## Onde ficam os logs
+
+Cada execucao com `--debug-mode` cria sua propria pasta de sessao:
+
+```text
+data/debug/session-YYYYMMDD-HHMMSS/
+```
+
+Exemplo:
+
+```text
+data/debug/session-20260428-231228/
+```
+
+Ao reportar um teste, informe sempre a pasta da sessao gerada.
+
+## Arquivos gerados
+
+### `session.txt`
+
+Informacoes basicas da sessao:
+
+- caminho da sessao;
+- data e hora;
+- argumentos usados;
+- configuracoes relevantes do debug.
+
+Use para confirmar se o jogo foi aberto com os parametros esperados.
+
+### `summary.txt`
+
+Arquivo mais importante para reporte rapido.
+
+Contem os principais numeros da sessao:
+
+- quantidade de frames;
+- media de frametime;
+- p95/p99;
+- pior frame;
+- total de late frames;
+- piores tempos de renderizacao;
+- piores tempos de audio/ADX/AFS;
+- totais de input;
+- caminhos dos CSVs gerados.
+
+Na maioria dos casos, este e o primeiro arquivo que deve ser analisado.
+
+### `frame_timing.csv`
+
+Dados de tempo por frame.
+
+Colunas principais:
+
+- `frame`;
+- `total_ms`;
+- `poll_ms`;
+- `begin_ms`;
+- `game0_ms`;
+- `end_ms`;
+- `game1_ms`;
+- `sleep_ms`;
+- `late_flag`.
+
+Use para encontrar exatamente em qual frame houve stutter ou late frame.
+
+### `event_log.csv`
+
+Log compacto de eventos relevantes.
+
+Pode incluir:
+
+- late frame;
+- spikes de renderizacao;
+- spikes de audio;
+- cache miss de textura;
+- inicio/troca de BGM;
+- leituras AFS;
+- fallback de textura indexada;
+- outros eventos agregados.
+
+Use para cruzar o frame ruim com a causa provavel.
+
+### `audio_stats.csv`
+
+Metricas por frame relacionadas a audio, BGM/ADX e AFS.
+
+Use para investigar:
+
+- `ADX_ProcessTracks`;
+- `ADX_StartMem`;
+- `ADX_EntryAfs`;
+- `ADX_StartAfs`;
+- leituras AFS sincronas;
+- fila de audio ADX;
+- troca de musica.
+
+Depois da otimizacao da Etapa 5, o esperado e:
+
+- `total_audio_afs_sync_reads=0`;
+- `worst_audio_afs_sync_read_ms=0.000`;
+- `worst_adx_load_file_ms=0.000`;
+- sem stutter perceptivel ao trocar BGM.
+
+### `input_events.csv`
+
+Log compacto de input convertido.
+
+Ele registra somente mudancas de estado, nao todos os frames.
+
+Colunas:
+
+```text
+frame,player,raw_state,converted_state,previous_state,changed_bits,event_type,held_frames,source
+```
+
+Eventos esperados:
+
+- `press`;
+- `release`.
+
+Use para confirmar:
+
+- se um botao apareceu no log;
+- em qual frame ele entrou;
+- quanto tempo ficou segurado;
+- se houve input duplicado;
+- se P1/P2 foram registrados corretamente.
+
+Trocas simultaneas, como soltar uma direcao e apertar outra no mesmo frame,
+podem gerar duas linhas no mesmo frame: uma `release` e uma `press`. Isso e
+esperado.
+
+### `render_stats.csv`
+
+Gerado no `--debug-mode` completo.
+
+Contem metricas detalhadas de renderizacao:
+
+- tarefas de render;
+- chamadas de geometry;
+- cache miss de textura;
+- invalidacoes;
+- updates de textura indexada;
+- fallback RGBA;
+- tempo de sort/render geometry.
+
+Use quando houver stutter ligado a renderizacao ou quando estiver comparando o
+caminho normal com o caminho indexado.
+
+### `step_stats.csv`
+
+Gerado no `--debug-mode` completo.
+
+Mede custos internos do loop principal:
+
+- `AFS_RunServer`;
+- `flPADGetALL`;
+- `keyConvert`;
+- copia de input;
+- `njUserMain`;
+- BGM server;
+- SPU/CSE.
+
+Use para saber qual parte do frame ficou cara.
+
+### `task_stats.csv`
+
+Gerado no `--debug-mode` completo.
+
+Registra estado e custo das tarefas principais do jogo.
+
+Use quando precisar relacionar um spike a menu, transicao, luta, bonus, tela de
+resultado ou outro estado interno.
+
+### Arquivos de handles de textura/paleta
+
+Podem aparecer quando o caminho indexado esta ativo:
+
+- `texture_handle_stats.csv`;
+- `palette_handle_stats.csv`;
+- `texture_palette_handle_stats.csv`.
+
+Use para diagnosticar vida util, uso e validacao de handles de textura e
+paleta.
+
+## Qual comando usar
+
+### Confirmar que o jogo normal nao cria arquivos de debug
+
+```bat
+SF3.exe
+```
+
+Confirme que nenhuma nova pasta `data/debug/session-*` foi criada.
+
+### Investigar stutter geral
+
+```bat
+SF3.exe --debug-mode
+```
+
+Use para menu, Training, Arcade, bonus ou lista de musicas.
+
+### Investigar renderizacao no caminho normal
+
+```bat
+SF3.exe --debug-mode
+```
+
+Analise `render_stats.csv`, `step_stats.csv`, `task_stats.csv`,
+`frame_timing.csv` e `event_log.csv`.
+
+### Validar o caminho indexado com menor interferencia
+
+```bat
+SF3.exe --debug-mode --debug-indexed-texture-path --debug-light-profile
+```
+
+Use para gameplay real, lutas completas, bonus e transicoes.
+
+### Comparar caminho normal vs caminho indexado completo
+
+Rode uma sessao com:
+
+```bat
+SF3.exe --debug-mode
+```
+
+Depois rode outra sessao com:
+
+```bat
+SF3.exe --debug-mode --debug-indexed-texture-path
+```
+
+Compare `summary.txt`, `frame_timing.csv`, `render_stats.csv` e
+`event_log.csv`.
+
+## Roteiro manual recomendado
+
+Para uma validacao importante, use uma sessao curta e objetiva:
+
+1. Abrir o jogo com o comando escolhido.
+2. Entrar no menu/opcoes.
+3. Testar lista de musicas, se o foco for BGM/ADX.
+4. Entrar no Training.
+5. Testar direcoes, botoes, dash, especiais, supers e parry.
+6. Jogar Arcade por pelo menos 2 ou 3 lutas completas.
+7. Testar transicao de round, tela de resultado e inicio da proxima luta.
+8. Testar bonus do carro quando relevante.
+9. Fechar o jogo normalmente.
+10. Anotar se houve stutter perceptivel e em qual momento aproximado.
+
+## Como reportar uma sessao
+
+Ao reportar um teste, informe:
+
+- comando usado;
+- pasta da sessao;
+- duracao aproximada;
+- modo testado: menu, Training, Arcade, bonus, lista de musicas;
+- se houve stutter perceptivel;
+- momento aproximado do stutter;
+- se audio atrasou, cortou ou ficou mudo;
+- se input pareceu atrasado, duplicado ou perdido.
+
+Exemplo:
+
+```text
+Comando:
+SF3.exe --debug-mode
+
+Sessao:
+data/debug/session-20260428-230829
+
+Teste:
+Training + Versus + Arcade curto.
+
+Resultado:
+Sem stutter perceptivel. Input normal. Audio normal.
+```
+
+## Interpretacao rapida
+
+### Sinais bons
+
+- `late_frames` baixo.
+- `p99_frame_ms` perto do alvo do frame.
+- `total_audio_afs_sync_reads=0`.
+- `worst_audio_afs_sync_read_ms=0.000`.
+- `total_indexed_texture_rgba_fallbacks=0` no caminho indexado.
+- `input_events.csv` pequeno e com eventos esperados.
+- Sem novo `error.log`.
+
+### Sinais de alerta
+
+- Stutter perceptivel durante gameplay.
+- `late_frames` alto fora do frame 0.
+- Picos repetidos em `event_log.csv`.
+- `AFS_ReadSync` aparecendo durante gameplay.
+- `worst_adx_load_file_ms` acima de zero em troca de BGM.
+- `input_events.csv` crescendo demais em pouco tempo.
+- Input sentido no controle, mas ausente em `input_events.csv`.
+- Audio cortando, atrasando ou ficando mudo.
+
+## Observacoes importantes
+
+- O parametro correto e `--debug-mode`, com dois hifens.
+- Nao use os demais parametros de debug sem `--debug-mode`.
+- O caminho normal `SF3.exe` nao deve gerar arquivos de debug.
+- O caminho indexado e experimental e deve ser usado apenas para validacao.
+- O `--debug-light-profile` reduz logs pesados para testes de gameplay.
+- Netplay esta fora do escopo atual deste fork.

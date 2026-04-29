@@ -2,6 +2,7 @@
 #include "common.h"
 #include "port/config/config.h"
 #include "port/config/keymap.h"
+#include "port/debug/debug_log.h"
 #include "port/sdl/netplay_screen.h"
 #include "port/sdl/netstats_renderer.h"
 #include "port/sdl/sdl_debug_text.h"
@@ -44,6 +45,27 @@ static Uint64 frame_counter = 0;
 static bool should_save_screenshot = false;
 static Uint64 last_mouse_motion_time = 0;
 static const int mouse_hide_delay_ms = 2000; // 2 seconds
+
+static const char* scale_mode_name() {
+    switch (scale_mode) {
+    case SCALEMODE_NEAREST:
+        return "nearest";
+
+    case SCALEMODE_LINEAR:
+        return "linear";
+
+    case SCALEMODE_SOFT_LINEAR:
+        return "soft-linear";
+
+    case SCALEMODE_SQUARE_PIXELS:
+        return "square-pixels";
+
+    case SCALEMODE_INTEGER:
+        return "integer";
+    }
+
+    return "unknown";
+}
 
 static SDL_ScaleMode screen_texture_scale_mode() {
     switch (scale_mode) {
@@ -171,6 +193,30 @@ int SDLApp_FullInit() {
     SDLPad_Init();
 
     return 0;
+}
+
+void SDLApp_WriteDebugSessionInfo() {
+    if (!DebugLog_IsEnabled()) {
+        return;
+    }
+
+    if (window == NULL || renderer == NULL) {
+        return;
+    }
+
+    int window_width = 0;
+    int window_height = 0;
+    int output_width = 0;
+    int output_height = 0;
+
+    SDL_GetWindowSize(window, &window_width, &window_height);
+    SDL_GetRenderOutputSize(renderer, &output_width, &output_height);
+
+    DebugLog_PrintSession("scale_mode=%s\n", scale_mode_name());
+    DebugLog_PrintSession("window_width=%d\n", window_width);
+    DebugLog_PrintSession("window_height=%d\n", window_height);
+    DebugLog_PrintSession("render_output_width=%d\n", output_width);
+    DebugLog_PrintSession("render_output_height=%d\n", output_height);
 }
 
 void SDLApp_Quit() {
@@ -349,22 +395,51 @@ static void save_texture(SDL_Texture* texture, const char* filename) {
     SDL_DestroySurface(rendered_surface);
 }
 
-void SDLApp_EndFrame() {
+void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
+    if (timing != NULL) {
+        SDL_zero(*timing);
+    }
+
     // Run sound processing
+    const Uint64 adx_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
     ADX_ProcessTracks();
+    if (timing != NULL) {
+        timing->adx_process_ms = (double)(SDL_GetTicksNS() - adx_start_ns) / 1e6;
+    }
+    DebugLog_RecordAdxProcess(
+        timing != NULL ? timing->adx_process_ms : 0.0, ADX_GetQueuedBytes(), ADX_GetNumFiles());
 
     // Render
 
     // This should come before SDLGameRenderer_RenderFrame,
     // because NetstatsRenderer uses the existing SFIII rendering pipeline
+    const Uint64 netplay_screen_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
     NetplayScreen_Render();
-    NetstatsRenderer_Render();
-    SDLGameRenderer_RenderFrame();
+    if (timing != NULL) {
+        timing->netplay_screen_render_ms = (double)(SDL_GetTicksNS() - netplay_screen_start_ns) / 1e6;
+    }
 
+    const Uint64 netstats_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
+    NetstatsRenderer_Render();
+    if (timing != NULL) {
+        timing->netstats_render_ms = (double)(SDL_GetTicksNS() - netstats_start_ns) / 1e6;
+    }
+
+    const Uint64 game_renderer_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
+    SDLGameRenderer_RenderFrame(timing != NULL ? &timing->render_stats : NULL);
+    if (timing != NULL) {
+        timing->game_renderer_render_ms = (double)(SDL_GetTicksNS() - game_renderer_start_ns) / 1e6;
+    }
+
+    const Uint64 screenshot_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
     if (should_save_screenshot) {
         save_texture(cps3_canvas, "screenshot_cps3.bmp");
     }
+    if (timing != NULL) {
+        timing->screenshot_ms += (double)(SDL_GetTicksNS() - screenshot_start_ns) / 1e6;
+    }
 
+    const Uint64 screen_copy_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
     SDL_SetRenderTarget(renderer, screen_texture);
 
     // Render window background
@@ -379,12 +454,21 @@ void SDLApp_EndFrame() {
     // Render screen texture to screen
     SDL_SetRenderTarget(renderer, NULL);
     SDL_RenderTexture(renderer, screen_texture, NULL, NULL);
+    if (timing != NULL) {
+        timing->screen_copy_ms = (double)(SDL_GetTicksNS() - screen_copy_start_ns) / 1e6;
+    }
 
+    const Uint64 screenshot_screen_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
     if (should_save_screenshot) {
         save_texture(screen_texture, "screenshot_screen.bmp");
     }
+    if (timing != NULL) {
+        timing->screenshot_ms += (double)(SDL_GetTicksNS() - screenshot_screen_start_ns) / 1e6;
+    }
 
 #if DEBUG
+    const Uint64 debug_text_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
+
     // Render debug text
     SDLDebugText_Render();
 
@@ -395,18 +479,34 @@ void SDLApp_EndFrame() {
     // SDL_SetRenderScale(renderer, 2, 2);
     // SDL_RenderDebugTextFormat(renderer, (window_width / 2) - 88, 2, "FPS: %.3f", fps);
     // SDL_SetRenderScale(renderer, 1, 1);
+    if (timing != NULL) {
+        timing->debug_text_ms = (double)(SDL_GetTicksNS() - debug_text_start_ns) / 1e6;
+    }
 #endif
 
+    const Uint64 present_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
     SDL_RenderPresent(renderer);
+    if (timing != NULL) {
+        timing->present_ms = (double)(SDL_GetTicksNS() - present_start_ns) / 1e6;
+    }
 
     // Cleanup
+    const Uint64 cleanup_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
     SDLGameRenderer_EndFrame();
     should_save_screenshot = false;
+    if (timing != NULL) {
+        timing->cleanup_ms = (double)(SDL_GetTicksNS() - cleanup_start_ns) / 1e6;
+    }
 
     // Handle cursor hiding
+    const Uint64 cursor_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
     hide_cursor_if_needed();
+    if (timing != NULL) {
+        timing->cursor_ms = (double)(SDL_GetTicksNS() - cursor_start_ns) / 1e6;
+    }
 
     // Do frame pacing
+    const Uint64 pacing_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
     Uint64 now = SDL_GetTicksNS();
 
     if (frame_deadline == 0) {
@@ -416,7 +516,19 @@ void SDLApp_EndFrame() {
     if (now < frame_deadline) {
         Uint64 sleep_time = frame_deadline - now;
         SDL_DelayNS(sleep_time);
-        now = SDL_GetTicksNS();
+        const Uint64 wake_time = SDL_GetTicksNS();
+
+        if (timing != NULL) {
+            const double requested_sleep_ms = (double)sleep_time / 1e6;
+            timing->sleep_ms = (double)(wake_time - now) / 1e6;
+            timing->sleep_overrun_ms = timing->sleep_ms - requested_sleep_ms;
+
+            if (timing->sleep_overrun_ms < 0.0) {
+                timing->sleep_overrun_ms = 0.0;
+            }
+        }
+
+        now = wake_time;
     }
 
     frame_deadline += target_frame_time_ns;
@@ -430,6 +542,14 @@ void SDLApp_EndFrame() {
     frame_counter += 1;
     note_frame_end_time();
     update_fps();
+    if (timing != NULL) {
+        timing->pacing_ms = (double)(SDL_GetTicksNS() - pacing_start_ns) / 1e6;
+        timing->pacing_overhead_ms = timing->pacing_ms - timing->sleep_ms;
+
+        if (timing->pacing_overhead_ms < 0.0) {
+            timing->pacing_overhead_ms = 0.0;
+        }
+    }
 }
 
 void SDLApp_Exit() {

@@ -3,6 +3,7 @@
 
 #include "structs.h"
 #include <SDL3/SDL.h>
+#include <stdbool.h>
 
 typedef struct SDLGameRenderer_Vertex {
     struct {
@@ -33,11 +34,37 @@ typedef struct Sprite2 {
     unsigned int id;
 } Sprite2;
 
+typedef struct SDLGameRendererStats {
+    int render_tasks;
+    int geometry_calls;
+    int texture_cache_misses;
+    int texture_cache_misses_first_use;
+    int texture_cache_misses_after_palette_unlock;
+    int texture_cache_misses_after_texture_unlock;
+    int texture_cache_misses_after_release;
+    int texture_cache_misses_unknown;
+    int palette_unlocks;
+    int texture_unlocks;
+    int palette_cache_invalidated_textures;
+    int texture_cache_invalidated_textures;
+    int release_cache_invalidated_textures;
+    int indexed_texture_updates;
+    int indexed_texture_update_pixels;
+    double indexed_texture_update_ms;
+    int indexed_palette_updates;
+    double indexed_palette_update_ms;
+    int indexed_texture_rgba_fallbacks;
+    double render_sort_ms;
+    double render_geometry_ms;
+} SDLGameRendererStats;
+
 extern SDL_Texture* cps3_canvas;
 
 void SDLGameRenderer_Init(SDL_Renderer* renderer);
+void SDLGameRenderer_SetDebugIndexedTexturePathEnabled(bool enabled);
+void SDLGameRenderer_WriteDebugTextureHandleStats();
 void SDLGameRenderer_BeginFrame();
-void SDLGameRenderer_RenderFrame();
+void SDLGameRenderer_RenderFrame(SDLGameRendererStats* stats);
 void SDLGameRenderer_EndFrame();
 
 void SDLGameRenderer_CreateTexture(unsigned int th);
