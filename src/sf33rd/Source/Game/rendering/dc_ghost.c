@@ -5,10 +5,12 @@
 
 #include "sf33rd/Source/Game/rendering/dc_ghost.h"
 #include "common.h"
+#include "port/utils.h"
 #include "port/sdl/sdl_game_renderer.h"
 #include "sf33rd/AcrSDK/ps2/flps2render.h"
 #include "sf33rd/AcrSDK/ps2/foundaps2.h"
 #include "sf33rd/Source/Common/PPGFile.h"
+#include "sf33rd/Source/Game/engine/workuser.h"
 #include "sf33rd/Source/Game/rendering/aboutspr.h"
 #include "sf33rd/Source/Game/rendering/color3rd.h"
 #include "structs.h"
@@ -39,6 +41,31 @@ typedef struct {
 
 NJDP2D_W njdp2d_w;
 MTX cmtx;
+
+static void njdp2d_fatal_error(const char* context, s32 steps, s32 index, s32 prev, s32 next) {
+    fatal_error("NJDP2D list corruption: context=%s steps=%d index=%d prev=%d next=%d ix1st=%d total=%d max=%d "
+                "mode=%d bonus_flag=%d bonus_type=%u game_timer=%u my_char=%u,%u",
+                context,
+                steps,
+                index,
+                prev,
+                next,
+                njdp2d_w.ix1st,
+                njdp2d_w.total,
+                NJDP2D_PRIM_MAX,
+                (int)Mode_Type,
+                Bonus_Game_Flag,
+                Bonus_Type,
+                Game_timer,
+                My_char[0],
+                My_char[1]);
+}
+
+static void njdp2d_validate_index(const char* context, s32 steps, s32 index, s32 prev) {
+    if (index < 0 || index >= NJDP2D_PRIM_MAX) {
+        njdp2d_fatal_error(context, steps, index, prev, -1);
+    }
+}
 
 static void matmul(MTX* dst, const MTX* a, const MTX* b) {
     MTX result;
@@ -171,10 +198,19 @@ void njdp2d_init() {
 
 void njdp2d_draw() {
     Quad prm;
+    s32 steps = 0;
     s32 i;
     s32 j;
+    s32 next;
 
-    for (i = njdp2d_w.ix1st; i != -1; i = njdp2d_w.prim[i].next) {
+    for (i = njdp2d_w.ix1st; i != -1; i = next) {
+        if (steps >= NJDP2D_PRIM_MAX) {
+            njdp2d_fatal_error("draw-cycle", steps, i, -1, -1);
+        }
+
+        njdp2d_validate_index("draw-index", steps, i, -1);
+        next = njdp2d_w.prim[i].next;
+
         switch (njdp2d_w.prim[i].type) {
         case 0:
             for (j = 0; j < 4; j++) {
@@ -187,7 +223,13 @@ void njdp2d_draw() {
         case 1:
             shadow_drawing((WORK*)njdp2d_w.prim[i].col, njdp2d_w.prim[i].v[0].y);
             break;
+
+        default:
+            njdp2d_fatal_error("draw-type", steps, i, -1, next);
+            break;
         }
+
+        steps += 1;
     }
 
     njdp2d_init();
@@ -198,11 +240,17 @@ void njdp2d_sort(f32* pos, f32 pri, uintptr_t col, s32 flag) {
     s32 i;
     s32 ix = njdp2d_w.total;
     s32 prev;
+    s32 steps;
+    s32 next;
 
     if (ix >= NJDP2D_PRIM_MAX) {
         // The 2D polygon display request has exceeded the buffer\n
         flLogOut("２Ｄポリゴンの表示要求がバッファをオーバーしました\n");
         return;
+    }
+
+    if (flag != 0 && flag != 1) {
+        njdp2d_fatal_error("sort-flag", 0, ix, -1, flag);
     }
 
     if (flag == 0) {
@@ -233,8 +281,15 @@ void njdp2d_sort(f32* pos, f32 pri, uintptr_t col, s32 flag) {
     } else {
         i = njdp2d_w.ix1st;
         prev = -1;
+        steps = 0;
 
         while (1) {
+            if (steps >= NJDP2D_PRIM_MAX) {
+                njdp2d_fatal_error("sort-cycle", steps, i, prev, -1);
+            }
+
+            njdp2d_validate_index("sort-index", steps, i, prev);
+
             if (pri > njdp2d_w.prim[i].v[0].z) {
                 if (prev == -1) {
                     njdp2d_w.ix1st = ix;
@@ -247,13 +302,16 @@ void njdp2d_sort(f32* pos, f32 pri, uintptr_t col, s32 flag) {
                 break;
             }
 
-            if (njdp2d_w.prim[i].next == -1) {
+            next = njdp2d_w.prim[i].next;
+
+            if (next == -1) {
                 njdp2d_w.prim[i].next = ix;
                 break;
             }
 
             prev = i;
-            i = njdp2d_w.prim[i].next;
+            i = next;
+            steps += 1;
         }
     }
 

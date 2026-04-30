@@ -5,6 +5,7 @@
 #include "sf33rd/AcrSDK/ps2/flps2etc.h"
 #include "sf33rd/AcrSDK/ps2/flps2render.h"
 #include "sf33rd/AcrSDK/ps2/foundaps2.h"
+#include "sf33rd/Source/Game/engine/workuser.h"
 #include "sf33rd/Source/Game/system/work_sys.h"
 
 #include <libgraph.h>
@@ -14,7 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define RENDER_TASK_MAX 1024
+#define RENDER_TASK_MAX 4096
 #define TEXTURE_DESTROY_QUEUE_INITIAL_CAPACITY 1024
 
 typedef struct RenderTask {
@@ -280,7 +281,20 @@ static void push_render_task(RenderTask* task) {
     }
 
     if (render_task_count >= RENDER_TASK_MAX) {
-        fatal_error("Render task queue overflow");
+        fatal_error("Render task queue overflow: count=%d max=%d next_index=%d next_z=%.3f next_texture=%p "
+                    "mode=%d bonus_flag=%d bonus_type=%u game_timer=%u my_char=%u,%u no_trans=%d",
+                    render_task_count,
+                    RENDER_TASK_MAX,
+                    task->index,
+                    task->z,
+                    (void*)task->texture,
+                    (int)Mode_Type,
+                    Bonus_Game_Flag,
+                    Bonus_Type,
+                    Game_timer,
+                    My_char[0],
+                    My_char[1],
+                    No_Trans);
     }
 
     memcpy(&render_tasks[render_task_count], task, sizeof(RenderTask));

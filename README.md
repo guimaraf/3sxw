@@ -41,7 +41,11 @@ This makes the game 100% portable: just copy the folder to another location or c
 
 ### Gill available from the start
 
-In the original game, the character **Gill** must be unlocked by clearing the game with every character. In this fork, **Gill is available to all players from the beginning**, with no requirements to fulfill.
+In the original game, the character **Gill** must be unlocked by clearing the game with every character. In this fork, the game initializes the official Gill unlock prerequisite on a fresh save, so **Gill is available to all players from the beginning** while still following the normal in-game unlock state.
+
+The domestic-version flow for **Extra Options / Extra Mode** is preserved: to unlock it, clear Arcade Mode with Gill and save the game. After saving, Extra Options remains available when the game is opened again.
+
+Gill has also been validated in Arcade Mode, including the car bonus stage and Sean's parry bonus stage.
 
 > **Note:** Gill is not available in Network (Netplay) mode, preserving online competitive balance.
 
@@ -125,7 +129,11 @@ Isso torna o jogo 100% portatil: basta copiar a pasta para outro local ou comput
 
 ### Gill disponivel desde o inicio
 
-No jogo original, o personagem **Gill** precisa ser desbloqueado terminando o jogo com todos os personagens. Neste fork, **Gill ja esta disponivel para todos os jogadores desde o inicio**, sem necessidade de cumprir nenhum requisito especial.
+No jogo original, o personagem **Gill** precisa ser desbloqueado terminando o jogo com todos os personagens. Neste fork, o jogo inicializa o pre-requisito oficial de desbloqueio do Gill em um save novo, entao **Gill ja fica disponivel para todos os jogadores desde o inicio**, mantendo o estado normal de desbloqueio usado pelo proprio jogo.
+
+O fluxo da versao domestica para **Extra Options / Extra Mode** foi preservado: para liberar esse modo, termine o Arcade Mode com Gill e salve o jogo. Depois de salvar, Extra Options continua disponivel ao abrir o jogo novamente.
+
+Gill tambem foi validado no Arcade Mode, incluindo o bonus do carro e o bonus de parry do Sean.
 
 > **Nota:** Gill nao esta disponivel no modo de jogo em rede (Netplay), mantendo a paridade competitiva online.
 
