@@ -723,6 +723,19 @@ void Setup_Default_Game_Option() {
     }
 }
 
+void Setup_Gill_Unlock_Prerequisite() {
+    const s16 modes[] = { 1, 4, 5 };
+    s16 mode_ix;
+    s16 char_ix;
+
+    for (mode_ix = 0; mode_ix < 3; mode_ix++) {
+        for (char_ix = 1; char_ix < 20; char_ix++) {
+            save_w[modes[mode_ix]].PL_Color[0][char_ix] = 1;
+            save_w[modes[mode_ix]].PL_Color[1][char_ix] = 1;
+        }
+    }
+}
+
 s32 Check_Change_Contents() {
     s16 ix;
     s16 ix2;

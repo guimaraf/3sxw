@@ -1367,6 +1367,7 @@ static void auto_load_load(_save_work* save) {
         }
 
         if (save->al_no_file != 0) {
+            Setup_Gill_Unlock_Prerequisite();
             save->r_no_1 = 5;
             mc_msg_set(save, 0);
             break;

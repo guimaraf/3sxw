@@ -40,6 +40,7 @@ void Save_Game_Data();
 void Copy_Save_w();
 void Copy_Check_w();
 void Setup_Default_Game_Option();
+void Setup_Gill_Unlock_Prerequisite();
 s32 Check_Change_Contents();
 void cpRevivalTask();
 s32 Check_Menu_Task();

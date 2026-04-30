@@ -282,8 +282,20 @@ void Sel_PL_Cont_1st() {
 }
 
 void Check_Use_Gill() {
+    s16 ix;
+
     if (Mode_Type == MODE_NETWORK) {
         return;
+    }
+
+    permission_player[1].ok[0] = 0;
+    permission_player[4].ok[0] = 0;
+    permission_player[5].ok[0] = 0;
+
+    for (ix = 1; ix < 20; ix++) {
+        if (save_w[1].PL_Color[0][ix] == 0) {
+            return;
+        }
     }
 
     permission_player[1].ok[0] = 1;
