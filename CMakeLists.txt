@@ -25,7 +25,11 @@ include_directories(
 file(GLOB_RECURSE GAME_SRC CONFIGURE_DEPENDS src/*.c)
 
 if(WIN32)
-    list(APPEND GAME_SRC "${CMAKE_SOURCE_DIR}/src/sf3.rc")
+    set(WINDOWS_RESOURCE_FILE "${CMAKE_SOURCE_DIR}/src/sf3.rc")
+    set_source_files_properties("${WINDOWS_RESOURCE_FILE}" PROPERTIES
+        OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/src/sf3.ico"
+    )
+    list(APPEND GAME_SRC "${WINDOWS_RESOURCE_FILE}")
 endif()
 
 add_executable(SF3 MACOSX_BUNDLE

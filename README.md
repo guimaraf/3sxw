@@ -65,9 +65,9 @@ Find instructions on how to build the project for [Windows](docs/buildWindows.md
 
 ## Community
 
-Join the `Crowded Street` server on Discord to discuss the original project, report bugs or share your ideas.
+Join the Discord server to discuss the project, report bugs or share your ideas.
 
-[![Join the Discord](https://dcbadge.limes.pink/api/server/https://discord.gg/wqs6BqYr8C)](https://discord.gg/wqs6BqYr8C)
+[Discord server](https://discord.gg/azVkHsYXNd)
 
 ---
 
@@ -153,9 +153,9 @@ Encontre instrucoes sobre como compilar o projeto para [Windows](docs/buildWindo
 
 ## Comunidade
 
-Junte-se ao servidor `Crowded Street` no Discord para discutir o projeto original, reportar bugs ou compartilhar suas ideias.
+Junte-se ao servidor do Discord para discutir o projeto, reportar bugs ou compartilhar suas ideias.
 
-[![Join the Discord](https://dcbadge.limes.pink/api/server/https://discord.gg/wqs6BqYr8C)](https://discord.gg/wqs6BqYr8C)
+[Servidor do Discord](https://discord.gg/azVkHsYXNd)
 
 ---
 
