@@ -42,7 +42,6 @@ add_executable(SF3 MACOSX_BUNDLE
 
 target_compile_definitions(SF3 PRIVATE
     $<$<CONFIG:Debug>:DEBUG>
-    $<$<CONFIG:Debug>:NETPLAY_ENABLED>
 
     $<$<CONFIG:Release>:RELEASE>
     $<$<CONFIG:Release>:CHECKSUM>

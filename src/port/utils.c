@@ -15,31 +15,55 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <SDL3/SDL.h>
 
 #define BACKTRACE_MAX 100
 
-void fatal_error(const char* fmt, ...) {
+static void report_critical_error(const char* fmt, va_list args) {
+    char message[1024];
+    vsnprintf(message, sizeof(message), fmt, args);
+
+    fprintf(stderr, "Critical error: %s\n", message);
+
     char log_path[512];
-    snprintf(log_path, sizeof(log_path), "%serror.log", Paths_GetDataPath());
-    FILE* log_f = fopen(log_path, "a");
+    FILE* log_f = NULL;
+    const char* data_path = Paths_GetDataPath();
 
-    va_list args;
-    va_start(args, fmt);
-
-    fprintf(stderr, "Fatal error: ");
-    vfprintf(stderr, fmt, args);
-    fprintf(stderr, "\n");
-
-    if (log_f) {
-        va_list args_copy;
-        va_copy(args_copy, args);
-        fprintf(log_f, "Fatal error: ");
-        vfprintf(log_f, fmt, args_copy);
-        fprintf(log_f, "\n");
-        va_end(args_copy);
+    if (data_path != NULL) {
+        snprintf(log_path, sizeof(log_path), "%serror.log", data_path);
+        log_f = fopen(log_path, "a");
     }
 
+    if (log_f != NULL) {
+        fprintf(log_f, "Critical error: %s\n", message);
+        fclose(log_f);
+    }
+
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "3SX - Critical error", message, NULL);
+}
+
+void critical_error(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    report_critical_error(fmt, args);
     va_end(args);
+}
+
+void fatal_error(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    report_critical_error(fmt, args);
+    va_end(args);
+
+    const char* data_path = Paths_GetDataPath();
+    char log_path[512];
+    FILE* log_f = NULL;
+
+    if (data_path != NULL) {
+        snprintf(log_path, sizeof(log_path), "%serror.log", data_path);
+        log_f = fopen(log_path, "a");
+    }
+
     void* buffer[BACKTRACE_MAX];
 
 #if !_WIN32

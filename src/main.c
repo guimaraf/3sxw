@@ -2,7 +2,6 @@
 #include "args.h"
 #include "common.h"
 #include "configuration.h"
-#include "netplay/netplay.h"
 #include "port/debug/debug_log.h"
 #include "port/sdl/sdl_app.h"
 #include "port/sdl/sdl_game_renderer.h"
@@ -43,7 +42,9 @@
 #endif
 
 #include "port/io/afs.h"
+#include "port/paths.h"
 #include "port/resources.h"
+#include "port/utils.h"
 
 #include <SDL3/SDL.h>
 
@@ -76,20 +77,15 @@ static MainPhase phase = MAIN_PHASE_INIT;
 static int main_argc = 0;
 static char* main_command_line = NULL;
 static DebugTaskStats* debug_current_task_stats = NULL;
+static bool afs_initialized = false;
+static bool game_initialized = false;
+static bool sdl_full_initialized = false;
 
 static u8* mppMalloc(u32 size) {
     return flAllocMemory(size);
 }
 
 // Initialization
-
-static void set_netplay_params() {
-    if (configuration.netplay.p2p_remote_ip != NULL) {
-        Netplay_SetParams(configuration.netplay.p2p_local_player, configuration.netplay.p2p_remote_ip);
-    } else if (configuration.netplay.matchmaking_ip != NULL) {
-        Netplay_SetMatchmakingParams(configuration.netplay.matchmaking_ip, configuration.netplay.matchmaking_port);
-    }
-}
 
 static void cpInitTask() {
     memset(&task, 0, sizeof(task));
@@ -169,22 +165,49 @@ static void init_windows_console() {
 }
 #endif
 
-static void initialize_game() {
-    SDLApp_FullInit();
+static bool initialize_game() {
+    if (!SDLApp_FullInit()) {
+        return false;
+    }
+
+    sdl_full_initialized = true;
     SDLApp_WriteDebugSessionInfo();
 
 #if _WIN32 && DEBUG
     init_windows_console();
 #endif
 
-    set_netplay_params();
-    AFS_Init(Resources_GetAFSPath());
+    const char* afs_path = Resources_GetAFSPath();
+
+    if (!AFS_Init(afs_path)) {
+        critical_error("Couldn't initialize the required game resource file:\n%s\n\nSDL error: %s",
+                       afs_path,
+                       SDL_GetError());
+        return false;
+    }
+
+    afs_initialized = true;
     sf3_init();
+    game_initialized = true;
+    return true;
 }
 
 static void cleanup() {
-    AFS_Finish();
-    SDLGameRenderer_WriteDebugTextureHandleStats();
+    if (game_initialized || system_init_level != 0) {
+        Exit_sound_system();
+        game_initialized = false;
+    }
+
+    if (afs_initialized) {
+        AFS_Finish();
+        afs_initialized = false;
+    }
+
+    if (sdl_full_initialized) {
+        SDLGameRenderer_WriteDebugTextureHandleStats();
+        sdl_full_initialized = false;
+    }
+
     DebugLog_Shutdown();
     SDL_free(main_command_line);
     main_command_line = NULL;
@@ -423,49 +446,31 @@ static void game_step_0(DebugStepStats* step_stats, DebugTaskStats* task_stats) 
 
     const Uint64 game_main_start_ns = debug_timing_start(step_stats);
 
-    if (Netplay_GetSessionState() != NETPLAY_SESSION_IDLE) {
-        Netplay_Run();
-        // Flush the 2D polygon buffer each frame when the game's normal render
-        // loop isn't running, preventing the 100-item limit from overflowing.
-        step_start_ns = debug_timing_start(step_stats);
-        njdp2d_draw();
-        if (step_stats != NULL) {
-            step_stats->njdp2d_draw_ms = debug_timing_elapsed(step_start_ns);
-        }
-    } else {
-        step_start_ns = debug_timing_start(step_stats);
-        DebugTaskStats* previous_task_stats = debug_current_task_stats;
-        debug_current_task_stats = task_stats;
-        njUserMain();
-        debug_current_task_stats = previous_task_stats;
-        if (step_stats != NULL) {
-            step_stats->nj_user_main_ms = debug_timing_elapsed(step_start_ns);
-        }
+    step_start_ns = debug_timing_start(step_stats);
+    DebugTaskStats* previous_task_stats = debug_current_task_stats;
+    debug_current_task_stats = task_stats;
+    njUserMain();
+    debug_current_task_stats = previous_task_stats;
+    if (step_stats != NULL) {
+        step_stats->nj_user_main_ms = debug_timing_elapsed(step_start_ns);
+    }
 
-        step_start_ns = debug_timing_start(step_stats);
-        seqsBeforeProcess();
-        if (step_stats != NULL) {
-            step_stats->seqs_before_process_ms = debug_timing_elapsed(step_start_ns);
-        }
+    step_start_ns = debug_timing_start(step_stats);
+    seqsBeforeProcess();
+    if (step_stats != NULL) {
+        step_stats->seqs_before_process_ms = debug_timing_elapsed(step_start_ns);
+    }
 
-        step_start_ns = debug_timing_start(step_stats);
-        njdp2d_draw();
-        if (step_stats != NULL) {
-            step_stats->njdp2d_draw_ms = debug_timing_elapsed(step_start_ns);
-        }
+    step_start_ns = debug_timing_start(step_stats);
+    njdp2d_draw();
+    if (step_stats != NULL) {
+        step_stats->njdp2d_draw_ms = debug_timing_elapsed(step_start_ns);
+    }
 
-        step_start_ns = debug_timing_start(step_stats);
-        seqsAfterProcess();
-        if (step_stats != NULL) {
-            step_stats->seqs_after_process_ms = debug_timing_elapsed(step_start_ns);
-        }
-
-        step_start_ns = debug_timing_start(step_stats);
-        Netplay_TickMatchmaking();
-        Netplay_TickDirectP2P();
-        if (step_stats != NULL) {
-            step_stats->netplay_tick_ms = debug_timing_elapsed(step_start_ns);
-        }
+    step_start_ns = debug_timing_start(step_stats);
+    seqsAfterProcess();
+    if (step_stats != NULL) {
+        step_stats->seqs_after_process_ms = debug_timing_elapsed(step_start_ns);
     }
 
     if (step_stats != NULL) {
@@ -545,13 +550,28 @@ static double elapsed_ms(Uint64 start_ns, Uint64 end_ns) {
 
 static int loop() {
     bool is_running = true;
+    int exit_code = 0;
     Uint64 debug_frame = 0;
     const double late_frame_threshold_ms = (1000.0 / TARGET_FPS) + 1.0;
 
     while (is_running) {
         switch (phase) {
         case MAIN_PHASE_INIT:
-            SDLApp_PreInit();
+            if (!SDLApp_PreInit()) {
+                exit_code = 1;
+                is_running = false;
+                break;
+            }
+
+            char storage_error[1024] = { 0 };
+
+            if (!Paths_ValidatePortableStorage(storage_error, sizeof(storage_error))) {
+                critical_error("Portable storage validation failed.\n\n%s\n\nMove or extract the game to a writable folder and try again.",
+                               storage_error);
+                exit_code = 1;
+                is_running = false;
+                break;
+            }
             SDLGameRenderer_SetDebugIndexedTexturePathEnabled(configuration.debug_runtime.enabled &&
                                                               configuration.debug_runtime.indexed_texture_path_enabled);
             DebugLog_Init(configuration.debug_runtime.enabled,
@@ -565,8 +585,12 @@ static int loop() {
             DebugLog_PrintSession("late_frame_threshold_ms=%.3f\n", late_frame_threshold_ms);
 
             if (Resources_Check()) {
-                initialize_game();
-                phase = MAIN_PHASE_INITIALIZED;
+                if (initialize_game()) {
+                    phase = MAIN_PHASE_INITIALIZED;
+                } else {
+                    exit_code = 1;
+                    is_running = false;
+                }
             } else {
                 phase = MAIN_PHASE_COPYING_RESOURCES;
             }
@@ -585,8 +609,12 @@ static int loop() {
             const bool resource_flow_ended = Resources_RunResourceCopyingFlow();
 
             if (resource_flow_ended) {
-                initialize_game();
-                phase = MAIN_PHASE_INITIALIZED;
+                if (initialize_game()) {
+                    phase = MAIN_PHASE_INITIALIZED;
+                } else {
+                    exit_code = 1;
+                    is_running = false;
+                }
             }
 
             break;
@@ -710,7 +738,7 @@ static int loop() {
     }
 
     cleanup();
-    return 0;
+    return exit_code;
 }
 
 int main(int argc, const char* argv[]) {

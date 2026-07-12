@@ -39,6 +39,7 @@ typedef struct OpenOperation {
 
 typedef struct CloseOperation {
     int fd;
+    int result;
 } CloseOperation;
 
 typedef struct ReadWriteOperation {
@@ -114,11 +115,26 @@ static char* get_mc_root_path(int port) {
     char* saves_dir = NULL;
     char* slot_dir = NULL;
 
-    SDL_asprintf(&saves_dir, "%s%s", data_path, MC_SAVES_DIR);
-    SDL_CreateDirectory(saves_dir);
+    if (data_path == NULL || SDL_asprintf(&saves_dir, "%s%s", data_path, MC_SAVES_DIR) < 0 || saves_dir == NULL) {
+        return NULL;
+    }
 
-    SDL_asprintf(&slot_dir, "%s%s", saves_dir, get_mc_slot_dir(port));
-    SDL_CreateDirectory(slot_dir);
+    if (!SDL_CreateDirectory(saves_dir)) {
+        SDL_Log("Couldn't create Memory Card directory '%s': %s", saves_dir, SDL_GetError());
+        SDL_free(saves_dir);
+        return NULL;
+    }
+
+    if (SDL_asprintf(&slot_dir, "%s%s", saves_dir, get_mc_slot_dir(port)) < 0 || slot_dir == NULL) {
+        SDL_free(saves_dir);
+        return NULL;
+    }
+
+    if (!SDL_CreateDirectory(slot_dir)) {
+        SDL_Log("Couldn't create Memory Card slot directory '%s': %s", slot_dir, SDL_GetError());
+        SDL_free(slot_dir);
+        slot_dir = NULL;
+    }
 
     SDL_free(saves_dir);
     return slot_dir;
@@ -128,11 +144,18 @@ static char* get_mc_path(int port, const char* name) {
     char* root_path = get_mc_root_path(port);
     char* full_path = NULL;
 
+    if (root_path == NULL || name == NULL) {
+        SDL_free(root_path);
+        return NULL;
+    }
+
     if (name[0] == '/') {
         name++; // Skip leading slash if any
     }
 
-    SDL_asprintf(&full_path, "%s%s", root_path, name);
+    if (SDL_asprintf(&full_path, "%s%s", root_path, name) < 0) {
+        full_path = NULL;
+    }
     SDL_free(root_path);
     return full_path;
 }
@@ -150,6 +173,14 @@ static int alloc_fd() {
 static void finalize_get_info(int* result) {
     char* root_path = get_mc_root_path(get_info_operation.port);
 
+    if (root_path == NULL) {
+        *get_info_operation.type = 0;
+        *get_info_operation.free = 0;
+        *get_info_operation.format = 0;
+        *result = sceMcResDeniedPermit;
+        return;
+    }
+
     // Pretend we have a formatted 8MB PS2 memory card
     *get_info_operation.type = sceMcTypePS2;
     *get_info_operation.free = 0x1F03; // ~8000 KB free
@@ -164,13 +195,13 @@ static void finalize_open(int* result) {
 }
 
 static void finalize_close(int* result) {
-    *result = sceMcResSucceed;
+    *result = close_operation.result;
 }
 
 static void finalize_read(int* result) {
     if (rw_operation.fd >= 0 && rw_operation.fd < MAX_OPEN_FILES && open_files[rw_operation.fd]) {
         size_t read = SDL_ReadIO(open_files[rw_operation.fd], rw_operation.read_buf, rw_operation.length);
-        *result = read;
+        *result = SDL_GetIOStatus(open_files[rw_operation.fd]) == SDL_IO_STATUS_ERROR ? sceMcResDeniedPermit : (int)read;
     } else {
         *result = sceMcResNoEntry;
     }
@@ -179,26 +210,20 @@ static void finalize_read(int* result) {
 static void finalize_write(int* result) {
     if (rw_operation.fd >= 0 && rw_operation.fd < MAX_OPEN_FILES && open_files[rw_operation.fd]) {
         size_t written = SDL_WriteIO(open_files[rw_operation.fd], rw_operation.write_buf, rw_operation.length);
-        *result = written;
+        *result = written == (size_t)rw_operation.length ? (int)written : sceMcResFullDevice;
     } else {
         *result = sceMcResNoEntry;
     }
 }
 
 static void finalize_mkdir(int* result) {
-    if (mkdir_operation.path) {
-        SDL_CreateDirectory(mkdir_operation.path);
-    }
-
-    *result = sceMcResSucceed;
+    *result = mkdir_operation.path != NULL && SDL_CreateDirectory(mkdir_operation.path) ? sceMcResSucceed
+                                                                                       : sceMcResDeniedPermit;
 }
 
 static void finalize_delete(int* result) {
-    if (delete_operation.path) {
-        SDL_RemovePath(delete_operation.path);
-    }
-
-    *result = sceMcResSucceed;
+    *result = delete_operation.path != NULL && SDL_RemovePath(delete_operation.path) ? sceMcResSucceed
+                                                                                     : sceMcResNoEntry;
 }
 
 typedef struct {
@@ -301,6 +326,11 @@ static int SDLCALL get_dir_callback(void* userdata, const char* dirname, const c
 
 static void finalize_get_dir(int* result) {
     char* path = get_mc_root_path(get_dir_operation.port);
+
+    if (path == NULL) {
+        *result = sceMcResDeniedPermit;
+        return;
+    }
     
     // The name passed to sceMcGetDir often has a leading slash
     const char* full_req = get_dir_operation.name;
@@ -355,8 +385,21 @@ static void finalize_get_dir(int* result) {
     data.count = 0;
     data.table = get_dir_operation.table;
     data.pattern = pattern;
-    
-    SDL_EnumerateDirectory(path, get_dir_callback, &data);
+
+    SDL_PathInfo directory_info = { 0 };
+
+    if (!SDL_GetPathInfo(path, &directory_info) || directory_info.type != SDL_PATHTYPE_DIRECTORY) {
+        SDL_free(path);
+        *result = 0;
+        return;
+    }
+
+    if (!SDL_EnumerateDirectory(path, get_dir_callback, &data)) {
+        SDL_Log("Couldn't enumerate Memory Card directory '%s': %s", path, SDL_GetError());
+        SDL_free(path);
+        *result = sceMcResDeniedPermit;
+        return;
+    }
     
     debug_print("sceMcGetDir: path=%s pattern=%s found=%d", path, pattern, data.count);
     
@@ -411,6 +454,11 @@ int sceMcOpen(int port, int slot, const char* name, int mode) {
     clear_open_operation();
     open_operation.port = normalize_mc_port(port);
     open_operation.path = get_mc_path(open_operation.port, name);
+
+    if (open_operation.path == NULL) {
+        open_operation.fd = sceMcResDeniedPermit;
+        return 0;
+    }
     
     int fd = alloc_fd();
     if (fd == -1) {
@@ -444,8 +492,9 @@ int sceMcOpen(int port, int slot, const char* name, int mode) {
 int sceMcClose(int fd) {
     registered_operation = sceMcFuncNoClose;
     close_operation.fd = fd;
+    close_operation.result = sceMcResNoEntry;
     if (fd >= 0 && fd < MAX_OPEN_FILES && open_files[fd]) {
-        SDL_CloseIO(open_files[fd]);
+        close_operation.result = SDL_CloseIO(open_files[fd]) ? sceMcResSucceed : sceMcResDeniedPermit;
         open_files[fd] = NULL;
     }
     return 0;

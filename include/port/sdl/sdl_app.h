@@ -25,8 +25,8 @@ typedef struct SDLAppFrameTiming {
     SDLGameRendererStats render_stats;
 } SDLAppFrameTiming;
 
-int SDLApp_PreInit();
-int SDLApp_FullInit();
+bool SDLApp_PreInit();
+bool SDLApp_FullInit();
 void SDLApp_WriteDebugSessionInfo();
 void SDLApp_Quit();
 

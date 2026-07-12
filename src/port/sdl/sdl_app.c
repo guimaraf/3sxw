@@ -3,13 +3,12 @@
 #include "port/config/config.h"
 #include "port/config/keymap.h"
 #include "port/debug/debug_log.h"
-#include "port/sdl/netplay_screen.h"
-#include "port/sdl/netstats_renderer.h"
 #include "port/sdl/sdl_debug_text.h"
 #include "port/sdl/sdl_game_renderer.h"
 #include "port/sdl/sdl_message_renderer.h"
 #include "port/sdl/sdl_pad.h"
 #include "port/sound/adx.h"
+#include "port/utils.h"
 #include "sf33rd/AcrSDK/ps2/foundaps2.h"
 
 #include <SDL3/SDL.h>
@@ -43,6 +42,8 @@ static double fps = 0;
 static Uint64 frame_counter = 0;
 
 static bool should_save_screenshot = false;
+static bool config_initialized = false;
+static bool pads_initialized = false;
 static Uint64 last_mouse_motion_time = 0;
 static const int mouse_hide_delay_ms = 2000; // 2 seconds
 
@@ -92,14 +93,19 @@ static SDL_Point screen_texture_size() {
     return size;
 }
 
-static void create_screen_texture() {
-    if (screen_texture != NULL) {
-        SDL_DestroyTexture(screen_texture);
+static bool create_screen_texture() {
+    const SDL_Point size = screen_texture_size();
+    SDL_Texture* new_texture =
+        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB32, SDL_TEXTUREACCESS_TARGET, size.x, size.y);
+
+    if (new_texture == NULL || !SDL_SetTextureScaleMode(new_texture, screen_texture_scale_mode())) {
+        SDL_DestroyTexture(new_texture);
+        return false;
     }
 
-    const SDL_Point size = screen_texture_size();
-    screen_texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB32, SDL_TEXTUREACCESS_TARGET, size.x, size.y);
-    SDL_SetTextureScaleMode(screen_texture, screen_texture_scale_mode());
+    SDL_DestroyTexture(screen_texture);
+    screen_texture = new_texture;
+    return true;
 }
 
 static void init_scalemode() {
@@ -150,49 +156,64 @@ static bool init_window() {
     return true;
 }
 
-int SDLApp_PreInit() {
+bool SDLApp_PreInit() {
     SDL_SetAppMetadata(app_name, "0.1", NULL);
     SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_PREFER_LIBDECOR, "1");
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
-        SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
-        return 1;
+        critical_error("Couldn't initialize SDL video: %s", SDL_GetError());
+        return false;
     }
 
-    return 0;
+    return true;
 }
 
-int SDLApp_FullInit() {
+bool SDLApp_FullInit() {
     Config_Init();
+    config_initialized = true;
     Keymap_Init();
     init_scalemode();
 
-    if (!SDL_Init(SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
-        SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
-        return 1;
+    if (!SDL_Init(SDL_INIT_GAMEPAD)) {
+        SDL_Log("Couldn't initialize the SDL gamepad subsystem; keyboard input remains available: %s", SDL_GetError());
+    }
+
+    if (!SDL_Init(SDL_INIT_AUDIO)) {
+        SDL_Log("Couldn't initialize the SDL audio subsystem; the game will continue without audio: %s", SDL_GetError());
     }
 
     if (!init_window()) {
-        SDL_Log("Couldn't initialize SDL window: %s", SDL_GetError());
-        return 1;
+        critical_error("Couldn't initialize the SDL window and renderer: %s", SDL_GetError());
+        return false;
     }
 
     // Initialize rendering subsystems
-    SDLMessageRenderer_Initialize(renderer);
-    SDLGameRenderer_Init(renderer);
+    if (!SDLMessageRenderer_Initialize(renderer)) {
+        critical_error("Couldn't initialize the message renderer: %s", SDL_GetError());
+        return false;
+    }
+
+    if (!SDLGameRenderer_Init(renderer)) {
+        critical_error("Couldn't initialize the game renderer: %s", SDL_GetError());
+        return false;
+    }
 
 #if DEBUG
     SDLDebugText_Initialize(renderer);
 #endif
 
     // Initialize screen texture
-    create_screen_texture();
+    if (!create_screen_texture()) {
+        critical_error("Couldn't create the screen texture: %s", SDL_GetError());
+        return false;
+    }
 
     // Initialize pads
     SDLPad_Init();
+    pads_initialized = true;
 
-    return 0;
+    return true;
 }
 
 void SDLApp_WriteDebugSessionInfo() {
@@ -220,9 +241,31 @@ void SDLApp_WriteDebugSessionInfo() {
 }
 
 void SDLApp_Quit() {
-    Config_Destroy();
-    SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(window);
+    if (pads_initialized) {
+        SDLPad_Quit();
+        pads_initialized = false;
+    }
+
+    if (config_initialized) {
+        Config_Destroy();
+        config_initialized = false;
+    }
+
+    SDL_DestroyTexture(screen_texture);
+    screen_texture = NULL;
+    SDLMessageRenderer_Quit();
+    SDLGameRenderer_Quit();
+
+    if (renderer != NULL) {
+        SDL_DestroyRenderer(renderer);
+        renderer = NULL;
+    }
+
+    if (window != NULL) {
+        SDL_DestroyWindow(window);
+        window = NULL;
+    }
+
     SDL_Quit();
 }
 
@@ -285,7 +328,9 @@ bool SDLApp_PollEvents() {
             break;
 
         case SDL_EVENT_WINDOW_RESIZED:
-            create_screen_texture();
+            if (!create_screen_texture()) {
+                SDL_Log("Couldn't resize the screen texture; keeping the previous texture: %s", SDL_GetError());
+            }
             break;
 
         case SDL_EVENT_QUIT:
@@ -410,20 +455,6 @@ void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
         timing != NULL ? timing->adx_process_ms : 0.0, ADX_GetQueuedBytes(), ADX_GetNumFiles());
 
     // Render
-
-    // This should come before SDLGameRenderer_RenderFrame,
-    // because NetstatsRenderer uses the existing SFIII rendering pipeline
-    const Uint64 netplay_screen_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
-    NetplayScreen_Render();
-    if (timing != NULL) {
-        timing->netplay_screen_render_ms = (double)(SDL_GetTicksNS() - netplay_screen_start_ns) / 1e6;
-    }
-
-    const Uint64 netstats_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
-    NetstatsRenderer_Render();
-    if (timing != NULL) {
-        timing->netstats_render_ms = (double)(SDL_GetTicksNS() - netstats_start_ns) / 1e6;
-    }
 
     const Uint64 game_renderer_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
     SDLGameRenderer_RenderFrame(timing != NULL ? &timing->render_stats : NULL);

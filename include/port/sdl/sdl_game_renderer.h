@@ -60,7 +60,8 @@ typedef struct SDLGameRendererStats {
 
 extern SDL_Texture* cps3_canvas;
 
-void SDLGameRenderer_Init(SDL_Renderer* renderer);
+bool SDLGameRenderer_Init(SDL_Renderer* renderer);
+void SDLGameRenderer_Quit();
 void SDLGameRenderer_SetDebugIndexedTexturePathEnabled(bool enabled);
 void SDLGameRenderer_WriteDebugTextureHandleStats();
 void SDLGameRenderer_BeginFrame();

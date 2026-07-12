@@ -607,6 +607,10 @@ static void process_pending_tracks() {
 }
 
 void ADX_ProcessTracks() {
+    if (stream == NULL) {
+        return;
+    }
+
     process_pending_tracks();
 
     const int first_track_index_old = first_track_index;
@@ -633,20 +637,35 @@ void ADX_ProcessTracks() {
     }
 }
 
-void ADX_Init() {
+bool ADX_Init() {
     const SDL_AudioSpec spec = { .format = SDL_AUDIO_S16, .channels = N_CHANNELS, .freq = SAMPLE_RATE };
     stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
+
+    if (stream == NULL) {
+        SDL_Log("Couldn't create the ADX music stream; music will be disabled: %s", SDL_GetError());
+        return false;
+    }
+
+    return true;
 }
 
 void ADX_Exit() {
     ADX_Stop();
-    SDL_DestroyAudioStream(stream);
+
+    if (stream != NULL) {
+        SDL_DestroyAudioStream(stream);
+        stream = NULL;
+    }
+
     free_buffer_pool();
 }
 
 void ADX_Stop() {
-    ADX_Pause(true);
-    SDL_ClearAudioStream(stream);
+    if (stream != NULL) {
+        ADX_Pause(true);
+        SDL_ClearAudioStream(stream);
+    }
+
     cancel_pending_tracks();
 
     for (int i = 0; i < num_tracks; i++) {
@@ -660,10 +679,18 @@ void ADX_Stop() {
 }
 
 int ADX_IsPaused() {
+    if (stream == NULL) {
+        return 1;
+    }
+
     return SDL_AudioStreamDevicePaused(stream);
 }
 
 void ADX_Pause(int pause) {
+    if (stream == NULL) {
+        return;
+    }
+
     if (pause) {
         SDL_PauseAudioStreamDevice(stream);
     } else {
@@ -672,6 +699,10 @@ void ADX_Pause(int pause) {
 }
 
 void ADX_StartMem(void* buf, size_t size) {
+    if (stream == NULL) {
+        return;
+    }
+
     const Uint64 start_ns = DebugLog_IsEnabled() ? SDL_GetTicksNS() : 0;
     ADX_Stop();
 
@@ -688,6 +719,10 @@ int ADX_GetNumFiles() {
 }
 
 void ADX_EntryAfs(int file_id) {
+    if (stream == NULL) {
+        return;
+    }
+
     const Uint64 start_ns = DebugLog_IsEnabled() ? SDL_GetTicksNS() : 0;
     queue_afs_track(file_id, false);
 
@@ -705,6 +740,10 @@ void ADX_ResetEntry() {
 }
 
 void ADX_StartAfs(int file_id) {
+    if (stream == NULL) {
+        return;
+    }
+
     const Uint64 start_ns = DebugLog_IsEnabled() ? SDL_GetTicksNS() : 0;
     ADX_Stop();
 
@@ -716,6 +755,10 @@ void ADX_StartAfs(int file_id) {
 }
 
 void ADX_SetOutVol(int volume) {
+    if (stream == NULL) {
+        return;
+    }
+
     // Convert volume (dB * 10) to linear gain
     const float gain = powf(10.0f, volume / 200.0f);
     SDL_SetAudioStreamGain(stream, gain);
@@ -726,7 +769,7 @@ void ADX_SetMono(bool mono) {
 }
 
 ADXState ADX_GetState() {
-    if (!has_tracks) {
+    if (stream == NULL || !has_tracks) {
         return ADX_STATE_STOP;
     }
 

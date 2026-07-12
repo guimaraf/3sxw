@@ -2,6 +2,7 @@
 
 #include "common.h"
 #include "port/debug/debug_log.h"
+#include "port/utils.h"
 #include <SDL3/SDL.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -347,8 +348,8 @@ void SPU_SDL_CB(void* user, SDL_AudioStream* stream, int additional_amount, int 
 
 static void nullcb() {}
 
-void SPU_Init(void (*cb)()) {
-    SDL_AudioSpec spec;
+bool SPU_Init(void (*cb)()) {
+    SDL_AudioSpec spec = { 0 };
 
     timer_cb = cb;
     if (!cb) {
@@ -358,16 +359,42 @@ void SPU_Init(void (*cb)()) {
     memset(voices, 0, sizeof(voices));
     soundLock = SDL_CreateMutex();
 
+    if (soundLock == NULL) {
+        fatal_error("Couldn't create the SPU synchronization mutex: %s", SDL_GetError());
+    }
+
     spec.channels = 2;
     spec.format = SDL_AUDIO_S16;
     spec.freq = 48000;
 
     stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, SPU_SDL_CB, NULL);
-    if (!stream) {
-        SDL_Log("Couldn't create SDL audio stream: %s", SDL_GetError());
+    if (stream == NULL) {
+        SDL_Log("Couldn't create the SPU effects stream; sound effects will be disabled: %s", SDL_GetError());
+        return false;
     }
 
-    SDL_ResumeAudioStreamDevice(stream);
+    if (!SDL_ResumeAudioStreamDevice(stream)) {
+        SDL_Log("Couldn't start the SPU effects stream; sound effects will be disabled: %s", SDL_GetError());
+        SDL_DestroyAudioStream(stream);
+        stream = NULL;
+        return false;
+    }
+
+    return true;
+}
+
+void SPU_Quit() {
+    if (stream != NULL) {
+        SDL_DestroyAudioStream(stream);
+        stream = NULL;
+    }
+
+    if (soundLock != NULL) {
+        SDL_DestroyMutex(soundLock);
+        soundLock = NULL;
+    }
+
+    timer_cb = nullcb;
 }
 
 void SPU_Upload(u32 dst, void* src, u32 size) {

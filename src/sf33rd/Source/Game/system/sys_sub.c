@@ -1031,7 +1031,9 @@ void Soft_Reset_Sub() {
     init_pulpul_work();
     pp_operator_check_flag(1);
     Init_Load_Request_Queue_1st();
+#if NETPLAY_ENABLED
     Netplay_CancelMatchmaking();
+#endif
     cpExitTask(TASK_MENU);
     cpExitTask(TASK_SAVER);
     cpExitTask(TASK_PAUSE);

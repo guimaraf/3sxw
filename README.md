@@ -47,8 +47,6 @@ The domestic-version flow for **Extra Options / Extra Mode** is preserved: to un
 
 Gill has also been validated in Arcade Mode, including the car bonus stage and Sean's parry bonus stage.
 
-> **Note:** Gill is not available in Network (Netplay) mode, preserving online competitive balance.
-
 ### Runtime debug mode
 
 This fork includes a runtime debug mode enabled with `--debug-mode`. It records diagnostic sessions under `data/debug/` with frame timing, render, audio, I/O, and input logs to help investigate stutter and performance issues.
@@ -74,10 +72,8 @@ Join the Discord server to discuss the project, report bugs or share your ideas.
 ## Acknowledgments
 
 This project uses:
-- [GekkoNet](https://github.com/HeatXD/GekkoNet) for P2P rollback netcode
 - [FFmpeg](https://ffmpeg.org) for ADX playback
 - [SDL3](https://github.com/libsdl-org/SDL) for window management, input handling, sound output and rendering
-- SDL_net for P2P connections
 - [libcdio / libiso9660](https://github.com/libcdio/libcdio) for `.iso` file reading
 - [zlib](https://zlib.net) for file decompression
 - [argparse](https://github.com/cofyc/argparse) for parsing CLI arguments
@@ -119,7 +115,7 @@ No projeto original, arquivos de save, configuracoes e outros dados eram armazen
 
 | Tipo de arquivo | Localizacao |
 |-----------------|-------------|
-| Save / progresso | `<pasta do jogo>/data/save/slot1/` e `<pasta do jogo>/data/save/slot1/` |
+| Save / progresso | `<pasta do jogo>/data/saves/slot1/` e `<pasta do jogo>/data/saves/slot2/` |
 | Replays | `<pasta do jogo>/data/saves/slot1/` e `<pasta do jogo>/data/saves/slot2/` |
 | Configuracoes | `<pasta do jogo>/data/config` |
 | Mapeamento de teclas | `<pasta do jogo>/data/keymap` |
@@ -134,8 +130,6 @@ No jogo original, o personagem **Gill** precisa ser desbloqueado terminando o jo
 O fluxo da versao domestica para **Extra Options / Extra Mode** foi preservado: para liberar esse modo, termine o Arcade Mode com Gill e salve o jogo. Depois de salvar, Extra Options continua disponivel ao abrir o jogo novamente.
 
 Gill tambem foi validado no Arcade Mode, incluindo o bonus do carro e o bonus de parry do Sean.
-
-> **Nota:** Gill nao esta disponivel no modo de jogo em rede (Netplay), mantendo a paridade competitiva online.
 
 ### Modo debug em runtime
 
@@ -162,10 +156,8 @@ Junte-se ao servidor do Discord para discutir o projeto, reportar bugs ou compar
 ## Agradecimentos
 
 Este projeto usa:
-- [GekkoNet](https://github.com/HeatXD/GekkoNet) para netcode P2P com rollback
 - [FFmpeg](https://ffmpeg.org) para reproducao de ADX
 - [SDL3](https://github.com/libsdl-org/SDL) para gerenciamento de janela, entrada, saida de som e renderizacao
-- SDL_net para conexoes P2P
 - [libcdio / libiso9660](https://github.com/libcdio/libcdio) para leitura de arquivos `.iso`
 - [zlib](https://zlib.net) para descompressao de arquivos
 - [argparse](https://github.com/cofyc/argparse) para parsing de argumentos CLI

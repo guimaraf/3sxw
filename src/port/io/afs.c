@@ -77,9 +77,17 @@ static void read_string(SDL_IOStream* src, char* dst) {
 
 static bool init_afs(const char* file_path) {
     afs.file_path = SDL_strdup(file_path);
+
+    if (afs.file_path == NULL) {
+        SDL_SetError("Couldn't allocate the AFS file path: %s", file_path);
+        return false;
+    }
+
     SDL_IOStream* io = SDL_IOFromFile(file_path, "rb");
 
     if (io == NULL) {
+        SDL_free(afs.file_path);
+        afs.file_path = NULL;
         return false;
     }
 
@@ -90,6 +98,9 @@ static bool init_afs(const char* file_path) {
 
     if (magic != AFS_MAGIC) {
         SDL_CloseIO(io);
+        SDL_free(afs.file_path);
+        afs.file_path = NULL;
+        SDL_SetError("Invalid AFS header in file: %s", file_path);
         return false;
     }
 
@@ -97,6 +108,14 @@ static bool init_afs(const char* file_path) {
 
     SDL_ReadU32LE(io, &afs.entry_count);
     afs.entries = SDL_malloc(sizeof(AFSEntry) * afs.entry_count);
+
+    if (afs.entries == NULL) {
+        SDL_CloseIO(io);
+        SDL_free(afs.file_path);
+        afs.file_path = NULL;
+        SDL_SetError("Couldn't allocate the AFS entry table for: %s", file_path);
+        return false;
+    }
 
     Uint32 entries_start_offset = 0;
     Uint32 entries_end_offset = 0;
@@ -156,6 +175,11 @@ static bool init_afs(const char* file_path) {
 
 static bool init_asyncio(const char* file_path) {
     asyncio_queue = SDL_CreateAsyncIOQueue();
+
+    if (asyncio_queue == NULL) {
+        SDL_SetError("Couldn't create the asynchronous AFS queue for: %s", file_path);
+    }
+
     return asyncio_queue != NULL;
 }
 
@@ -164,7 +188,15 @@ bool AFS_Init(const char* file_path) {
         return false;
     }
 
-    return init_asyncio(file_path);
+    if (!init_asyncio(file_path)) {
+        char async_error[512];
+        SDL_strlcpy(async_error, SDL_GetError(), sizeof(async_error));
+        AFS_Finish();
+        SDL_SetError("%s", async_error);
+        return false;
+    }
+
+    return true;
 }
 
 void AFS_Finish() {
@@ -172,7 +204,10 @@ void AFS_Finish() {
     SDL_free(afs.entries);
     SDL_zero(afs);
     SDL_zeroa(requests);
-    SDL_DestroyAsyncIOQueue(asyncio_queue);
+    if (asyncio_queue != NULL) {
+        SDL_DestroyAsyncIOQueue(asyncio_queue);
+        asyncio_queue = NULL;
+    }
 }
 
 unsigned int AFS_GetFileCount() {

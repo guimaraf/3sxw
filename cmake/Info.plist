@@ -18,5 +18,7 @@
     <string>11.0</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.games</string>
+    <key>SDL_FILESYSTEM_BASE_DIR_TYPE</key>
+    <string>parent</string>
 </dict>
 </plist>

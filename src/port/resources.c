@@ -21,6 +21,11 @@ static void create_dialog_parent_window() {
     }
 
     dialog_owner_window = SDL_CreateWindow("3SX", 1, 1, SDL_WINDOW_HIDDEN);
+
+    if (dialog_owner_window == NULL) {
+        return;
+    }
+
     SDL_ShowWindow(dialog_owner_window);
     SDL_RaiseWindow(dialog_owner_window);
 }
@@ -35,21 +40,36 @@ static void destroy_dialog_owner_window() {
 }
 
 static bool file_exists(const char* path) {
-    SDL_PathInfo path_info;
-    SDL_GetPathInfo(path, &path_info);
-    return path_info.type == SDL_PATHTYPE_FILE;
+    SDL_PathInfo path_info = { 0 };
+    return SDL_GetPathInfo(path, &path_info) && path_info.type == SDL_PATHTYPE_FILE;
 }
 
-static void create_resources_directory() {
+static bool create_resources_directory() {
     char* path = Resources_GetPath(NULL);
-    SDL_CreateDirectory(path);
+    const bool created = path != NULL && SDL_CreateDirectory(path);
+
+    if (!created) {
+        SDL_snprintf(error,
+                     ERROR_LEN_MAX,
+                     "Failed to create the resources directory:\n%s\n\n%s",
+                     path != NULL ? path : "<unavailable>",
+                     SDL_GetError());
+    }
+
     SDL_free(path);
+    return created;
 }
 
 #define CHUNK_SECTORS 16
 #define BUFFER_SIZE (ISO_BLOCKSIZE * CHUNK_SECTORS)
 
 static void open_file_dialog_callback(void* userdata, const char* const* filelist, int filter) {
+    if (filelist == NULL || filelist[0] == NULL) {
+        SDL_snprintf(error, ERROR_LEN_MAX, "No ISO file was selected.");
+        flow_state = COPY_ERROR;
+        return;
+    }
+
     const char* iso_path = filelist[0];
 
     iso9660_t* iso = iso9660_open(iso_path);
@@ -74,13 +94,28 @@ static void open_file_dialog_callback(void* userdata, const char* const* filelis
         }
     }
 
-    create_resources_directory();
+    if (!create_resources_directory()) {
+        iso9660_stat_free(stat);
+        iso9660_close(iso);
+        flow_state = COPY_ERROR;
+        return;
+    }
+
     const char* dst_path = Resources_GetAFSPath();
     SDL_IOStream* dst_io = SDL_IOFromFile(dst_path, "wb");
+
+    if (dst_io == NULL) {
+        iso9660_stat_free(stat);
+        iso9660_close(iso);
+        SDL_snprintf(error, ERROR_LEN_MAX, "Failed to create the resource file:\n%s\n\n%s", dst_path, SDL_GetError());
+        flow_state = COPY_ERROR;
+        return;
+    }
 
     uint8_t buffer[BUFFER_SIZE];
     uint64_t bytes_remaining = stat->total_size;
     lsn_t current_lsn = stat->lsn;
+    bool copy_failed = false;
 
 #if CHECKSUM
     sha256 sha;
@@ -92,7 +127,28 @@ static void open_file_dialog_callback(void* userdata, const char* const* filelis
         const uint64_t sectors_to_read = (bytes_to_read + ISO_BLOCKSIZE - 1) / ISO_BLOCKSIZE;
 
         const long bytes_read = iso9660_iso_seek_read(iso, buffer, current_lsn, sectors_to_read);
-        SDL_WriteIO(dst_io, buffer, bytes_read);
+
+        if (bytes_read <= 0) {
+            SDL_snprintf(error,
+                         ERROR_LEN_MAX,
+                         "Failed to read game resources from ISO:\n%s\n\nRead stopped with %ld bytes.",
+                         iso_path,
+                         bytes_read);
+            copy_failed = true;
+            break;
+        }
+
+        const size_t bytes_written = SDL_WriteIO(dst_io, buffer, (size_t)bytes_read);
+
+        if (bytes_written != (size_t)bytes_read) {
+            SDL_snprintf(error,
+                         ERROR_LEN_MAX,
+                         "Failed to write the complete resource file:\n%s\n\n%s",
+                         dst_path,
+                         SDL_GetError());
+            copy_failed = true;
+            break;
+        }
 
 #if CHECKSUM
         sha256_append(&sha, buffer, bytes_read);
@@ -104,7 +160,16 @@ static void open_file_dialog_callback(void* userdata, const char* const* filelis
 
     iso9660_stat_free(stat);
     iso9660_close(iso);
-    SDL_CloseIO(dst_io);
+    if (!SDL_CloseIO(dst_io)) {
+        SDL_snprintf(error, ERROR_LEN_MAX, "Failed to finish writing the resource file:\n%s\n\n%s", dst_path, SDL_GetError());
+        copy_failed = true;
+    }
+
+    if (copy_failed) {
+        SDL_RemovePath(dst_path);
+        flow_state = COPY_ERROR;
+        return;
+    }
 
 #if CHECKSUM
     char hex[SHA256_HEX_SIZE];
@@ -158,6 +223,14 @@ bool Resources_Check() {
     SDL_IOStream* io = SDL_IOFromFile(afs_path, "rb");
     size_t bytes_read = 0;
 
+    if (buf == NULL || io == NULL) {
+        SDL_free(buf);
+        if (io != NULL) {
+            SDL_CloseIO(io);
+        }
+        return false;
+    }
+
     while (true) {
         bytes_read = SDL_ReadIO(io, buf, chunk_size);
 
@@ -169,7 +242,12 @@ bool Resources_Check() {
     }
 
     SDL_free(buf);
+    const bool read_failed = SDL_GetIOStatus(io) == SDL_IO_STATUS_ERROR;
     SDL_CloseIO(io);
+
+    if (read_failed) {
+        return false;
+    }
 
     char hex[SHA256_HEX_SIZE];
     sha256_finalize_hex(&sha, hex);
@@ -188,11 +266,16 @@ bool Resources_RunResourceCopyingFlow() {
     switch (flow_state) {
     case INIT:
         create_dialog_parent_window();
+        const char* required_path = Resources_GetAFSPath();
+        char* missing_message = NULL;
+        SDL_asprintf(&missing_message,
+                     "3SX requires the following game resource file:\n\n%s\n\nPlace the correctly named file at this path, or choose a valid Street Fighter III: 3rd Strike ISO in the next dialog.",
+                     required_path);
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION,
-                                 "Valid resources are missing",
-                                 "3SX needs resources from a copy of \"Street Fighter III: 3rd Strike\" to run. Choose "
-                                 "the iso in the next dialog",
+                                 "Required game resource is missing",
+                                 missing_message != NULL ? missing_message : required_path,
                                  dialog_owner_window);
+        SDL_free(missing_message);
         open_dialog();
         break;
 

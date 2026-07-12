@@ -12,7 +12,7 @@ typedef enum ADXState {
 
 void ADX_ProcessTracks();
 
-void ADX_Init();
+bool ADX_Init();
 void ADX_Exit();
 void ADX_Stop();
 int ADX_IsPaused();

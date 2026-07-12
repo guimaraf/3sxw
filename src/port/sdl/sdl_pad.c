@@ -87,7 +87,13 @@ static void handle_gamepad_added_event(SDL_GamepadDeviceEvent* event) {
         return;
     }
 
-    const SDL_Gamepad* gamepad = SDL_OpenGamepad(event->which);
+    SDL_Gamepad* gamepad = SDL_OpenGamepad(event->which);
+
+    if (gamepad == NULL) {
+        SDL_Log("Couldn't open gamepad: %s", SDL_GetError());
+        setup_keyboard();
+        return;
+    }
 
     for (int i = 0; i < INPUT_SOURCES_MAX; i++) {
         SDLPad_InputSource* input_source = &input_sources[i];
@@ -195,6 +201,21 @@ static void get_gamepad_state(int id, SDLPad_ButtonState* state) {
 
 void SDLPad_Init() {
     setup_keyboard();
+}
+
+void SDLPad_Quit() {
+    for (int i = 0; i < SDL_arraysize(input_sources); i++) {
+        SDLPad_InputSource* input_source = &input_sources[i];
+
+        if (input_source->type == SDLPAD_INPUT_GAMEPAD && input_source->gamepad.gamepad != NULL) {
+            SDL_CloseGamepad(input_source->gamepad.gamepad);
+        }
+    }
+
+    SDL_zeroa(input_sources);
+    SDL_zeroa(button_state);
+    connected_input_sources = 0;
+    keyboard_index = -1;
 }
 
 void SDLPad_HandleGamepadDeviceEvent(SDL_GamepadDeviceEvent* event) {

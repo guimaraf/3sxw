@@ -1,4 +1,5 @@
 #include "port/sdl/sdl_message_renderer.h"
+#include "port/utils.h"
 
 #include <SDL3/SDL.h>
 
@@ -18,17 +19,47 @@ static const SDL_Color knjsub_palette_colors[4] = {
     { .r = 255, .g = 255, .b = 255, .a = 255 },
 };
 
-void SDLMessageRenderer_Initialize(SDL_Renderer* renderer) {
+bool SDLMessageRenderer_Initialize(SDL_Renderer* renderer) {
     _renderer = renderer;
 
     // Initialize canvas
     message_canvas =
         SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, canvas_width, canvas_height);
-    SDL_SetTextureScaleMode(message_canvas, SDL_SCALEMODE_NEAREST);
+
+    if (message_canvas == NULL || !SDL_SetTextureScaleMode(message_canvas, SDL_SCALEMODE_NEAREST)) {
+        SDL_Log("Couldn't initialize the message canvas (%dx%d): %s", canvas_width, canvas_height, SDL_GetError());
+        SDLMessageRenderer_Quit();
+        return false;
+    }
 
     // Initialize knjsub palette
     knjsub_palette = SDL_CreatePalette(4);
-    SDL_SetPaletteColors(knjsub_palette, knjsub_palette_colors, 0, 4);
+
+    if (knjsub_palette == NULL || !SDL_SetPaletteColors(knjsub_palette, knjsub_palette_colors, 0, 4)) {
+        SDL_Log("Couldn't initialize the message palette: %s", SDL_GetError());
+        SDLMessageRenderer_Quit();
+        return false;
+    }
+
+    return true;
+}
+
+void SDLMessageRenderer_Quit() {
+    if (knjsub_texture != NULL) {
+        SDL_DestroyTexture(knjsub_texture);
+    }
+
+    if (knjsub_palette != NULL) {
+        SDL_DestroyPalette(knjsub_palette);
+    }
+
+    if (message_canvas != NULL) {
+        SDL_DestroyTexture(message_canvas);
+    }
+    knjsub_texture = NULL;
+    knjsub_palette = NULL;
+    message_canvas = NULL;
+    _renderer = NULL;
 }
 
 void SDLMessageRenderer_BeginFrame() {
@@ -39,17 +70,28 @@ void SDLMessageRenderer_BeginFrame() {
 }
 
 void SDLMessageRenderer_CreateTexture(int width, int height, void* pixels, int format) {
-    if (knjsub_texture != NULL) {
-        SDL_DestroyTexture(knjsub_texture);
+    SDL_Surface* surface = SDL_CreateSurfaceFrom(width, height, SDL_PIXELFORMAT_INDEX4LSB, pixels, width / 2);
+
+    if (surface == NULL) {
+        fatal_error("Couldn't create message surface: size=%dx%d format=%d error=%s", width, height, format, SDL_GetError());
     }
 
-    SDL_Surface* surface = SDL_CreateSurfaceFrom(width, height, SDL_PIXELFORMAT_INDEX4LSB, pixels, width / 2);
-    SDL_SetSurfacePalette(surface, knjsub_palette);
-    knjsub_texture = SDL_CreateTextureFromSurface(_renderer, surface);
+    if (!SDL_SetSurfacePalette(surface, knjsub_palette)) {
+        SDL_DestroySurface(surface);
+        fatal_error("Couldn't apply the message palette: size=%dx%d format=%d error=%s", width, height, format, SDL_GetError());
+    }
+
+    SDL_Texture* new_texture = SDL_CreateTextureFromSurface(_renderer, surface);
     SDL_DestroySurface(surface);
 
-    SDL_SetTextureScaleMode(knjsub_texture, SDL_SCALEMODE_NEAREST);
-    SDL_SetTextureBlendMode(knjsub_texture, SDL_BLENDMODE_BLEND);
+    if (new_texture == NULL || !SDL_SetTextureScaleMode(new_texture, SDL_SCALEMODE_NEAREST) ||
+        !SDL_SetTextureBlendMode(new_texture, SDL_BLENDMODE_BLEND)) {
+        SDL_DestroyTexture(new_texture);
+        fatal_error("Couldn't create message texture: size=%dx%d format=%d error=%s", width, height, format, SDL_GetError());
+    }
+
+    SDL_DestroyTexture(knjsub_texture);
+    knjsub_texture = new_texture;
 }
 
 static int adjust_coordinate(int coordinate, bool is_x, bool is_uv) {

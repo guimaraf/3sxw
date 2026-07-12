@@ -1007,11 +1007,71 @@ static void lerp_fcolors(SDL_FColor* dest, const SDL_FColor* a, const SDL_FColor
 
 // Lifecycle
 
-void SDLGameRenderer_Init(SDL_Renderer* renderer) {
+bool SDLGameRenderer_Init(SDL_Renderer* renderer) {
     _renderer = renderer;
     cps3_canvas =
         SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, cps3_width, cps3_height);
-    SDL_SetTextureScaleMode(cps3_canvas, SDL_SCALEMODE_NEAREST);
+
+    if (cps3_canvas == NULL || !SDL_SetTextureScaleMode(cps3_canvas, SDL_SCALEMODE_NEAREST)) {
+        SDL_Log("Couldn't initialize the CPS3 canvas (%dx%d): %s", cps3_width, cps3_height, SDL_GetError());
+        SDLGameRenderer_Quit();
+        return false;
+    }
+
+    return true;
+}
+
+void SDLGameRenderer_Quit() {
+    destroy_textures();
+
+    for (int texture_index = 0; texture_index < FL_TEXTURE_MAX; texture_index++) {
+        for (int palette_handle = 0; palette_handle <= FL_PALETTE_MAX; palette_handle++) {
+            if (texture_cache[texture_index][palette_handle] != NULL) {
+                SDL_DestroyTexture(texture_cache[texture_index][palette_handle]);
+            }
+        }
+
+        if (surfaces[texture_index] != NULL) {
+            SDL_DestroySurface(surfaces[texture_index]);
+        }
+    }
+
+    for (int palette_index = 0; palette_index < FL_PALETTE_MAX; palette_index++) {
+        if (palettes[palette_index] != NULL) {
+            SDL_DestroyPalette(palettes[palette_index]);
+        }
+    }
+
+    if (cps3_canvas != NULL) {
+        SDL_DestroyTexture(cps3_canvas);
+    }
+    SDL_free(textures_to_destroy);
+    SDL_free(texture_palette_handle_stats);
+    SDL_free(indexed_texture_rgba_buffer);
+    SDL_free(indexed_texture_index8_buffer);
+
+    cps3_canvas = NULL;
+    _renderer = NULL;
+    textures_to_destroy = NULL;
+    textures_to_destroy_count = 0;
+    textures_to_destroy_capacity = 0;
+    texture_palette_handle_stats = NULL;
+    indexed_texture_rgba_buffer = NULL;
+    indexed_texture_rgba_buffer_size = 0;
+    indexed_texture_index8_buffer = NULL;
+    indexed_texture_index8_buffer_size = 0;
+    texture_count = 0;
+    render_task_count = 0;
+    SDL_zeroa(surfaces);
+    SDL_zeroa(palettes);
+    SDL_zeroa(textures);
+    SDL_zeroa(texture_cache);
+    SDL_zeroa(texture_cache_mode);
+    SDL_zeroa(texture_cache_pixels_dirty);
+    SDL_zeroa(texture_cache_palette_dirty);
+    SDL_zeroa(texture_cache_used_this_frame);
+    SDL_zeroa(texture_cache_has_been_created);
+    SDL_zeroa(texture_cache_last_invalidation);
 }
 
 void SDLGameRenderer_SetDebugIndexedTexturePathEnabled(bool enabled) {
@@ -1266,7 +1326,13 @@ void SDLGameRenderer_UnlockTexture(unsigned int th) {
 }
 
 void SDLGameRenderer_CreateTexture(unsigned int th) {
-    const int texture_index = LO_16_BITS(th) - 1;
+    const int texture_handle = LO_16_BITS(th);
+
+    if (!is_valid_texture_handle(texture_handle)) {
+        fatal_error("Invalid texture handle while creating texture: code=0x%08X handle=%d", th, texture_handle);
+    }
+
+    const int texture_index = texture_handle - 1;
     const FLTexture* fl_texture = &flTexture[texture_index];
     const void* pixels = flPS2GetSystemBuffAdrs(fl_texture->mem_handle);
     SDL_PixelFormat pixel_format = SDL_PIXELFORMAT_UNKNOWN;
@@ -1274,6 +1340,16 @@ void SDLGameRenderer_CreateTexture(unsigned int th) {
 
     if (surfaces[texture_index] != NULL) {
         fatal_error("Overwriting an existing texture");
+    }
+
+    if (pixels == NULL || fl_texture->width <= 0 || fl_texture->height <= 0) {
+        fatal_error("Invalid texture data: code=0x%08X handle=%d size=%dx%d memory_handle=%u pixels=%p",
+                    th,
+                    texture_handle,
+                    fl_texture->width,
+                    fl_texture->height,
+                    (unsigned int)fl_texture->mem_handle,
+                    pixels);
     }
 
     switch (fl_texture->format) {
@@ -1299,6 +1375,18 @@ void SDLGameRenderer_CreateTexture(unsigned int th) {
 
     const SDL_Surface* surface =
         SDL_CreateSurfaceFrom(fl_texture->width, fl_texture->height, pixel_format, pixels, pitch);
+
+    if (surface == NULL) {
+        fatal_error("Couldn't create texture surface: code=0x%08X handle=%d size=%dx%d format=%d pitch=%d error=%s",
+                    th,
+                    texture_handle,
+                    fl_texture->width,
+                    fl_texture->height,
+                    fl_texture->format,
+                    pitch,
+                    SDL_GetError());
+    }
+
     surfaces[texture_index] = surface;
 }
 
@@ -1337,7 +1425,13 @@ void SDLGameRenderer_DestroyTexture(unsigned int texture_handle) {
 }
 
 void SDLGameRenderer_CreatePalette(unsigned int ph) {
-    const int palette_index = HI_16_BITS(ph) - 1;
+    const int palette_handle = HI_16_BITS(ph);
+
+    if (!is_valid_palette_handle(palette_handle)) {
+        fatal_error("Invalid palette handle while creating palette: code=0x%08X handle=%d", ph, palette_handle);
+    }
+
+    const int palette_index = palette_handle - 1;
     const FLTexture* fl_palette = &flPalette[palette_index];
     const void* pixels = flPS2GetSystemBuffAdrs(fl_palette->mem_handle);
     const int color_count = fl_palette->width * fl_palette->height;
@@ -1346,6 +1440,16 @@ void SDLGameRenderer_CreatePalette(unsigned int ph) {
 
     if (palettes[palette_index] != NULL) {
         fatal_error("Overwriting an existing palette");
+    }
+
+    if (pixels == NULL || fl_palette->width <= 0 || fl_palette->height <= 0) {
+        fatal_error("Invalid palette data: code=0x%08X handle=%d size=%dx%d memory_handle=%u pixels=%p",
+                    ph,
+                    palette_handle,
+                    fl_palette->width,
+                    fl_palette->height,
+                    (unsigned int)fl_palette->mem_handle,
+                    pixels);
     }
 
     switch (fl_palette->format) {
@@ -1384,7 +1488,17 @@ void SDLGameRenderer_CreatePalette(unsigned int ph) {
     }
 
     SDL_Palette* palette = SDL_CreatePalette(color_count);
-    SDL_SetPaletteColors(palette, colors, 0, color_count);
+
+    if (palette == NULL || !SDL_SetPaletteColors(palette, colors, 0, color_count)) {
+        SDL_DestroyPalette(palette);
+        fatal_error("Couldn't create palette: code=0x%08X handle=%d colors=%d format=%d error=%s",
+                    ph,
+                    palette_handle,
+                    color_count,
+                    fl_palette->format,
+                    SDL_GetError());
+    }
+
     palettes[palette_index] = palette;
 }
 
@@ -1424,17 +1538,41 @@ void SDLGameRenderer_DestroyPalette(unsigned int palette_handle) {
 
 void SDLGameRenderer_SetTexture(unsigned int th) {
     const int texture_handle = LO_16_BITS(th);
-    const int texture_index = texture_handle - 1;
-    const SDL_Surface* surface = surfaces[texture_handle - 1];
     const int palette_handle = HI_16_BITS(th);
-    const SDL_Palette* palette = palette_handle != 0 ? palettes[palette_handle - 1] : NULL;
+
+    if (!is_valid_texture_handle(texture_handle) ||
+        (palette_handle != 0 && !is_valid_palette_handle(palette_handle))) {
+        fatal_error("Invalid texture code while binding: code=0x%08X texture_handle=%d palette_handle=%d",
+                    th,
+                    texture_handle,
+                    palette_handle);
+    }
+
+    const int texture_index = texture_handle - 1;
+    SDL_Surface* surface = surfaces[texture_handle - 1];
+    SDL_Palette* palette = palette_handle != 0 ? palettes[palette_handle - 1] : NULL;
+
+    if (surface == NULL || (palette_handle != 0 && palette == NULL)) {
+        fatal_error("Texture resources are missing while binding: code=0x%08X texture_handle=%d palette_handle=%d surface=%p palette=%p",
+                    th,
+                    texture_handle,
+                    palette_handle,
+                    surface,
+                    palette);
+    }
 
     if (dump_textures) {
         save_texture(surface, palette);
     }
 
     if (palette != NULL) {
-        SDL_SetSurfacePalette(surface, palette);
+        if (!SDL_SetSurfacePalette(surface, palette)) {
+            fatal_error("Couldn't apply palette while binding texture: code=0x%08X texture_handle=%d palette_handle=%d error=%s",
+                        th,
+                        texture_handle,
+                        palette_handle,
+                        SDL_GetError());
+        }
     }
 
     SDL_Texture* texture = NULL;

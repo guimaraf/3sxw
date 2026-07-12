@@ -7,6 +7,7 @@
 #include "common.h"
 #include "main.h"
 #include "port/sound/adx.h"
+#include "port/sound/spu.h"
 #include "sf33rd/AcrSDK/MiddleWare/PS2/CapSndEng/cse.h"
 #include "sf33rd/AcrSDK/MiddleWare/PS2/CapSndEng/emlMemMap.h"
 #include "sf33rd/AcrSDK/MiddleWare/PS2/CapSndEng/emlSndDrv.h"
@@ -141,8 +142,10 @@ void Init_sound_system() {
     bgm_seamless_always = 0;
     sys_w.sound_mode = 0;
     sys_w.bgm_type = BGM_ARRANGED;
-    ADX_Init();
-    system_init_level |= 2;
+    if (ADX_Init()) {
+        system_init_level |= 2;
+    }
+
     cseInitSndDrv();
     system_init_level |= 1;
 }
@@ -197,6 +200,7 @@ void Exit_sound_system() {
 
     if (system_init_level & 1) {
         spu_all_off();
+        SPU_Quit();
         system_init_level &= ~1;
     }
 }

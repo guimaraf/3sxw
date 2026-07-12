@@ -12,7 +12,8 @@ struct SPUVConf {
 
 extern SDL_Mutex* soundLock;
 
-void SPU_Init(void (*cb)());
+bool SPU_Init(void (*cb)());
+void SPU_Quit();
 void SPU_Upload(u32 dst, void* src, u32 size);
 void SPU_Tick(s16* output);
 void SPU_VoiceStart(int vnum, u32 start_addr);

@@ -29,6 +29,7 @@ typedef struct SDLPad_ButtonState {
 } SDLPad_ButtonState;
 
 void SDLPad_Init();
+void SDLPad_Quit();
 void SDLPad_HandleGamepadDeviceEvent(SDL_GamepadDeviceEvent* event);
 bool SDLPad_IsGamepadConnected(int id);
 void SDLPad_GetButtonState(int id, SDLPad_ButtonState* state);
