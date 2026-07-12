@@ -3,13 +3,6 @@
 
 #include <stdbool.h>
 
-typedef struct NetplayConfiguration {
-    int p2p_local_player;
-    const char* p2p_remote_ip;
-    const char* matchmaking_ip;
-    int matchmaking_port;
-} NetplayConfiguration;
-
 typedef struct DebugRuntimeConfiguration {
     int enabled;
     int indexed_texture_path_enabled;
@@ -24,7 +17,6 @@ typedef struct TestRunnerConfiguration {
 #endif
 
 typedef struct Configuration {
-    NetplayConfiguration netplay;
     DebugRuntimeConfiguration debug_runtime;
 #if DEBUG
     TestRunnerConfiguration test;

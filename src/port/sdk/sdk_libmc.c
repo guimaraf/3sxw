@@ -21,6 +21,7 @@
 #define MC_SAVES_DIR "saves/"
 #define MC_SLOT1_DIR "slot1/"
 #define MC_SLOT2_DIR "slot2/"
+#define MC_OPEN_CREATE 0x0200
 
 typedef void (*OperationFinalizer)(int* result);
 
@@ -62,6 +63,14 @@ typedef struct PathOperation {
     char* path;
 } PathOperation;
 
+typedef struct OpenFile {
+    SDL_IOStream* stream;
+    char* final_path;
+    char* temporary_path;
+    bool atomic_write;
+    bool write_failed;
+} OpenFile;
+
 static GetInfoOperation get_info_operation = { 0 };
 static OpenOperation open_operation = { 0 };
 static CloseOperation close_operation = { 0 };
@@ -71,7 +80,7 @@ static PathOperation mkdir_operation = { 0 };
 static PathOperation delete_operation = { 0 };
 static int registered_operation = 0;
 
-static SDL_IOStream* open_files[MAX_OPEN_FILES] = { NULL };
+static OpenFile open_files[MAX_OPEN_FILES] = { { 0 } };
 
 static void clear_open_operation(void) {
     if (open_operation.path) {
@@ -162,11 +171,45 @@ static char* get_mc_path(int port, const char* name) {
 
 static int alloc_fd() {
     for (int i = 0; i < MAX_OPEN_FILES; i++) {
-        if (open_files[i] == NULL) {
+        if (open_files[i].stream == NULL) {
             return i;
         }
     }
     return -1;
+}
+
+static void clear_open_file(OpenFile* file) {
+    SDL_free(file->final_path);
+    SDL_free(file->temporary_path);
+    SDL_zerop(file);
+}
+
+static void discard_open_file(OpenFile* file) {
+    if (file->stream != NULL) {
+        SDL_CloseIO(file->stream);
+        file->stream = NULL;
+    }
+
+    if (file->temporary_path != NULL) {
+        SDL_RemovePath(file->temporary_path);
+    }
+
+    clear_open_file(file);
+}
+
+static char* create_temporary_mc_path(const char* final_path, int fd) {
+    char* temporary_path = NULL;
+
+    if (SDL_asprintf(&temporary_path,
+                     "%s.3sx-tmp-%016llx-%08x-%d",
+                     final_path,
+                     (unsigned long long)SDL_GetTicksNS(),
+                     SDL_rand_bits(),
+                     fd) < 0) {
+        return NULL;
+    }
+
+    return temporary_path;
 }
 
 // Finalizers
@@ -199,18 +242,34 @@ static void finalize_close(int* result) {
 }
 
 static void finalize_read(int* result) {
-    if (rw_operation.fd >= 0 && rw_operation.fd < MAX_OPEN_FILES && open_files[rw_operation.fd]) {
-        size_t read = SDL_ReadIO(open_files[rw_operation.fd], rw_operation.read_buf, rw_operation.length);
-        *result = SDL_GetIOStatus(open_files[rw_operation.fd]) == SDL_IO_STATUS_ERROR ? sceMcResDeniedPermit : (int)read;
+    if (rw_operation.fd >= 0 && rw_operation.fd < MAX_OPEN_FILES && open_files[rw_operation.fd].stream &&
+        rw_operation.read_buf != NULL && rw_operation.length >= 0) {
+        SDL_IOStream* stream = open_files[rw_operation.fd].stream;
+        const size_t read = SDL_ReadIO(stream, rw_operation.read_buf, (size_t)rw_operation.length);
+        const bool read_succeeded = read == (size_t)rw_operation.length &&
+                                    SDL_GetIOStatus(stream) != SDL_IO_STATUS_ERROR;
+        *result = read_succeeded ? (int)read : sceMcResDeniedPermit;
+
+        if (!read_succeeded) {
+            discard_open_file(&open_files[rw_operation.fd]);
+        }
     } else {
         *result = sceMcResNoEntry;
     }
 }
 
 static void finalize_write(int* result) {
-    if (rw_operation.fd >= 0 && rw_operation.fd < MAX_OPEN_FILES && open_files[rw_operation.fd]) {
-        size_t written = SDL_WriteIO(open_files[rw_operation.fd], rw_operation.write_buf, rw_operation.length);
-        *result = written == (size_t)rw_operation.length ? (int)written : sceMcResFullDevice;
+    if (rw_operation.fd >= 0 && rw_operation.fd < MAX_OPEN_FILES && open_files[rw_operation.fd].stream &&
+        rw_operation.write_buf != NULL && rw_operation.length >= 0) {
+        OpenFile* file = &open_files[rw_operation.fd];
+        const size_t written = SDL_WriteIO(file->stream, rw_operation.write_buf, (size_t)rw_operation.length);
+        file->write_failed = file->write_failed || written != (size_t)rw_operation.length ||
+                             SDL_GetIOStatus(file->stream) == SDL_IO_STATUS_ERROR;
+        *result = file->write_failed ? sceMcResFullDevice : (int)written;
+
+        if (file->write_failed) {
+            discard_open_file(file);
+        }
     } else {
         *result = sceMcResNoEntry;
     }
@@ -222,8 +281,18 @@ static void finalize_mkdir(int* result) {
 }
 
 static void finalize_delete(int* result) {
-    *result = delete_operation.path != NULL && SDL_RemovePath(delete_operation.path) ? sceMcResSucceed
-                                                                                     : sceMcResNoEntry;
+    if (delete_operation.path == NULL) {
+        *result = sceMcResDeniedPermit;
+        return;
+    }
+
+    SDL_PathInfo info;
+    if (!SDL_GetPathInfo(delete_operation.path, &info)) {
+        *result = sceMcResNoEntry;
+        return;
+    }
+
+    *result = SDL_RemovePath(delete_operation.path) ? sceMcResSucceed : sceMcResDeniedPermit;
 }
 
 typedef struct {
@@ -466,23 +535,40 @@ int sceMcOpen(int port, int slot, const char* name, int mode) {
         return 0;
     }
     
+    OpenFile* open_file = &open_files[fd];
+    const bool atomic_write = (mode & SCE_STM_W) != 0 && (mode & MC_OPEN_CREATE) == 0;
     const char* sdl_mode = "rb";
-    if (mode == 0x01) sdl_mode = "rb"; // O_RDONLY (SCE_CREAT not set typically)
-    else if (mode & 0x0200) sdl_mode = "w+b"; // O_CREAT
-    else sdl_mode = "r+b"; // O_RDWR
-    
-    debug_print("sceMcOpen: file=%s mode=%d mapped=%s", name, mode, sdl_mode);
-    
-    SDL_IOStream* file = SDL_IOFromFile(open_operation.path, sdl_mode);
-    if (!file && (mode & 0x0200)) {
-        // Fallback for creation
-        file = SDL_IOFromFile(open_operation.path, "wb");
+
+    if (atomic_write) {
+        open_file->final_path = SDL_strdup(open_operation.path);
+        open_file->temporary_path = create_temporary_mc_path(open_operation.path, fd);
+        SDL_PathInfo info;
+        const bool target_exists = SDL_GetPathInfo(open_operation.path, &info) && info.type == SDL_PATHTYPE_FILE;
+
+        if (target_exists && open_file->final_path != NULL && open_file->temporary_path != NULL) {
+            open_file->stream = SDL_IOFromFile(open_file->temporary_path, "w+b");
+            open_file->atomic_write = open_file->stream != NULL;
+        }
+
+        sdl_mode = "atomic-w+b";
+    } else if (mode & MC_OPEN_CREATE) {
+        SDL_PathInfo info;
+        const bool already_exists = SDL_GetPathInfo(open_operation.path, &info) && info.type == SDL_PATHTYPE_FILE;
+        sdl_mode = already_exists ? "r+b" : "w+b";
+        open_file->stream = SDL_IOFromFile(open_operation.path, sdl_mode);
+    } else {
+        open_file->stream = SDL_IOFromFile(open_operation.path, sdl_mode);
     }
 
-    if (file) {
-        open_files[fd] = file;
+    debug_print("sceMcOpen: file=%s mode=%d mapped=%s", name, mode, sdl_mode);
+
+    if (open_file->stream != NULL) {
         open_operation.fd = fd;
     } else {
+        if (open_file->temporary_path != NULL) {
+            SDL_RemovePath(open_file->temporary_path);
+        }
+        clear_open_file(open_file);
         open_operation.fd = sceMcResNoEntry;
     }
     
@@ -493,9 +579,24 @@ int sceMcClose(int fd) {
     registered_operation = sceMcFuncNoClose;
     close_operation.fd = fd;
     close_operation.result = sceMcResNoEntry;
-    if (fd >= 0 && fd < MAX_OPEN_FILES && open_files[fd]) {
-        close_operation.result = SDL_CloseIO(open_files[fd]) ? sceMcResSucceed : sceMcResDeniedPermit;
-        open_files[fd] = NULL;
+    if (fd >= 0 && fd < MAX_OPEN_FILES && open_files[fd].stream) {
+        OpenFile* file = &open_files[fd];
+        const bool close_succeeded = SDL_CloseIO(file->stream);
+        file->stream = NULL;
+        bool commit_succeeded = close_succeeded && !file->write_failed;
+
+        if (file->atomic_write) {
+            if (commit_succeeded) {
+                commit_succeeded = SDL_RenamePath(file->temporary_path, file->final_path);
+            }
+
+            if (!commit_succeeded) {
+                SDL_RemovePath(file->temporary_path);
+            }
+        }
+
+        close_operation.result = commit_succeeded ? sceMcResSucceed : sceMcResDeniedPermit;
+        clear_open_file(file);
     }
     return 0;
 }

@@ -6,6 +6,30 @@ Esta rodada deve reforcar os caminhos de erro e o ciclo de vida dos recursos sem
 
 As correcoes estao organizadas por prioridade. Cada etapa deve ser validada separadamente para facilitar a identificacao de regressoes.
 
+## Correcao de compilacao identificada antes desta rodada
+
+Durante o primeiro build local depois das alteracoes anteriores, o Clang interrompeu a compilacao de `src/sf33rd/Source/Game/sound/sound3rd.c` porque a chamada a `SPU_Quit()` nao possuia uma declaracao visivel naquele arquivo.
+
+Erro apresentado:
+
+```text
+error: call to undeclared function 'SPU_Quit'; ISO C99 and later do not support implicit function declarations
+```
+
+A funcao ja estava declarada em `include/port/sound/spu.h` e implementada em `src/port/sound/spu.c`. A correcao aplicada foi incluir explicitamente o cabecalho no controlador de som:
+
+```c
+#include "port/sound/spu.h"
+```
+
+Esta correcao nao altera o comportamento do audio. Ela apenas formaliza a dependencia usada por `Exit_sound_system()` e permite a compilacao com `-Werror`.
+
+Validacao local informada:
+
+- O projeto voltou a compilar.
+- O jogo iniciou normalmente.
+- Nao foi percebida regressao em relacao ao estado inicial analisado.
+
 ## Prioridade 1 - Ciclo de vida assincrono do AFS
 
 Arquivos principais:
@@ -135,6 +159,8 @@ Ajustes:
 5. Interromper somente a faixa afetada quando ocorrer erro de decodificacao.
 6. Registrar um erro critico conciso em Release, incluindo faixa ou recurso relacionado.
 7. Preservar o carregamento assincrono e o comportamento de uma musica diferente por round.
+8. Manter buffers de leituras canceladas fora do pool ate a confirmacao de fechamento do `SDL_AsyncIO`.
+9. Corrigir o deslocamento em bytes usado ao copiar samples para o buffer de loop ADX.
 
 Criterios de validacao:
 
@@ -275,4 +301,3 @@ Ajustes gerais:
 - Nao mover dados portateis para pastas do sistema operacional.
 - Nao implementar ou reparar Netplay e rollback.
 - Nao incluir assets proprietarios no repositorio ou nos pacotes de build.
-

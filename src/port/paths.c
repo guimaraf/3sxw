@@ -67,7 +67,12 @@ bool Paths_ValidatePortableStorage(char* error, size_t error_size) {
 
     char* probe_path = NULL;
 
-    if (SDL_asprintf(&probe_path, "%s.3sx-write-test.tmp", portable_data_path) < 0 || probe_path == NULL) {
+    if (SDL_asprintf(&probe_path,
+                     "%s.3sx-write-test-%016llx-%08x.tmp",
+                     portable_data_path,
+                     (unsigned long long)SDL_GetTicksNS(),
+                     SDL_rand_bits()) < 0 ||
+        probe_path == NULL) {
         SDL_snprintf(error, error_size, "Couldn't allocate the portable storage test path.");
         return false;
     }

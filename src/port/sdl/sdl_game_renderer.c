@@ -1489,14 +1489,25 @@ void SDLGameRenderer_CreatePalette(unsigned int ph) {
 
     SDL_Palette* palette = SDL_CreatePalette(color_count);
 
-    if (palette == NULL || !SDL_SetPaletteColors(palette, colors, 0, color_count)) {
-        SDL_DestroyPalette(palette);
+    if (palette == NULL) {
         fatal_error("Couldn't create palette: code=0x%08X handle=%d colors=%d format=%d error=%s",
                     ph,
                     palette_handle,
                     color_count,
                     fl_palette->format,
                     SDL_GetError());
+    }
+
+    if (!SDL_SetPaletteColors(palette, colors, 0, color_count)) {
+        char palette_error[512];
+        SDL_strlcpy(palette_error, SDL_GetError(), sizeof(palette_error));
+        SDL_DestroyPalette(palette);
+        fatal_error("Couldn't configure palette: code=0x%08X handle=%d colors=%d format=%d error=%s",
+                    ph,
+                    palette_handle,
+                    color_count,
+                    fl_palette->format,
+                    palette_error);
     }
 
     palettes[palette_index] = palette;

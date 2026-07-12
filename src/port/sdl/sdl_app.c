@@ -12,6 +12,7 @@
 #include "sf33rd/AcrSDK/ps2/foundaps2.h"
 
 #include <SDL3/SDL.h>
+#include <limits.h>
 
 #define FRAME_END_TIMES_MAX 30
 
@@ -81,29 +82,54 @@ static SDL_ScaleMode screen_texture_scale_mode() {
     }
 }
 
-static SDL_Point screen_texture_size() {
-    SDL_Point size;
-    SDL_GetRenderOutputSize(renderer, &size.x, &size.y);
-
-    if (scale_mode == SCALEMODE_SOFT_LINEAR) {
-        size.x *= 2;
-        size.y *= 2;
-    }
-
-    return size;
-}
-
-static bool create_screen_texture() {
-    const SDL_Point size = screen_texture_size();
-    SDL_Texture* new_texture =
-        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB32, SDL_TEXTUREACCESS_TARGET, size.x, size.y);
-
-    if (new_texture == NULL || !SDL_SetTextureScaleMode(new_texture, screen_texture_scale_mode())) {
-        SDL_DestroyTexture(new_texture);
+static bool screen_texture_size(SDL_Point* size) {
+    if (!SDL_GetRenderOutputSize(renderer, &size->x, &size->y)) {
         return false;
     }
 
-    SDL_DestroyTexture(screen_texture);
+    if (size->x <= 0 || size->y <= 0) {
+        SDL_SetError("Invalid renderer output size: %dx%d", size->x, size->y);
+        return false;
+    }
+
+    if (scale_mode == SCALEMODE_SOFT_LINEAR) {
+        if (size->x > INT_MAX / 2 || size->y > INT_MAX / 2) {
+            SDL_SetError("Renderer output is too large for soft linear scaling: %dx%d", size->x, size->y);
+            return false;
+        }
+
+        size->x *= 2;
+        size->y *= 2;
+    }
+
+    return true;
+}
+
+static bool create_screen_texture() {
+    SDL_Point size;
+
+    if (!screen_texture_size(&size)) {
+        return false;
+    }
+
+    SDL_Texture* new_texture =
+        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB32, SDL_TEXTUREACCESS_TARGET, size.x, size.y);
+
+    if (new_texture == NULL) {
+        return false;
+    }
+
+    if (!SDL_SetTextureScaleMode(new_texture, screen_texture_scale_mode())) {
+        char texture_error[512];
+        SDL_strlcpy(texture_error, SDL_GetError(), sizeof(texture_error));
+        SDL_DestroyTexture(new_texture);
+        SDL_SetError("%s", texture_error);
+        return false;
+    }
+
+    if (screen_texture != NULL) {
+        SDL_DestroyTexture(screen_texture);
+    }
     screen_texture = new_texture;
     return true;
 }
@@ -251,7 +277,9 @@ void SDLApp_Quit() {
         config_initialized = false;
     }
 
-    SDL_DestroyTexture(screen_texture);
+    if (screen_texture != NULL) {
+        SDL_DestroyTexture(screen_texture);
+    }
     screen_texture = NULL;
     SDLMessageRenderer_Quit();
     SDLGameRenderer_Quit();
