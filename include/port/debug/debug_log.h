@@ -43,8 +43,6 @@ typedef struct DebugRenderStats {
     double render_sort_ms;
     double render_geometry_ms;
     double adx_process_ms;
-    double netplay_screen_render_ms;
-    double netstats_render_ms;
     double game_renderer_render_ms;
     double screenshot_ms;
     double screen_copy_ms;
@@ -70,7 +68,6 @@ typedef struct DebugStepStats {
     double seqs_before_process_ms;
     double njdp2d_draw_ms;
     double seqs_after_process_ms;
-    double netplay_tick_ms;
     double knj_flush_ms;
     double disp_effect_work_ms;
     double fl_flip_ms;

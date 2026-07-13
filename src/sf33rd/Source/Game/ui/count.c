@@ -27,7 +27,7 @@ bool mugen_flag;
 s8 hoji_counter;
 
 void count_cont_init(u8 type) {
-    Counter_hi = save_w[Present_Mode].Time_Limit; // FIXME: use a consistent value in netplay
+    Counter_hi = save_w[Present_Mode].Time_Limit;
 
     if (Counter_hi == -1) {
         mugen_flag = true;

@@ -10,8 +10,6 @@
 typedef struct SDLAppFrameTiming {
     double sleep_ms;
     double adx_process_ms;
-    double netplay_screen_render_ms;
-    double netstats_render_ms;
     double game_renderer_render_ms;
     double screenshot_ms;
     double screen_copy_ms;

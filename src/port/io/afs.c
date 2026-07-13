@@ -1,6 +1,7 @@
 #include "port/io/afs.h"
 #include "common.h"
 #include "port/debug/debug_log.h"
+#include "port/utils.h"
 #include <SDL3/SDL.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -481,7 +482,10 @@ void AFS_Read(AFSHandle handle, int sectors, void* buf) {
     request->asyncio = SDL_AsyncIOFromFile(afs.file_path, "r");
 
     if (request->asyncio == NULL) {
-        printf("SDL_AsyncIOFromFile error: %s\n", SDL_GetError());
+        log_error("Couldn't open the AFS async reader for file %d in '%s': %s",
+                  request->file_num,
+                  afs.file_path,
+                  SDL_GetError());
         request->state = AFS_READ_STATE_ERROR;
         return;
     }
@@ -489,7 +493,10 @@ void AFS_Read(AFSHandle handle, int sectors, void* buf) {
     const bool success = SDL_ReadAsyncIO(request->asyncio, buf, offset, read_size, asyncio_queue, request);
 
     if (!success) {
-        printf("SDL_ReadAsyncIO error: %s\n", SDL_GetError());
+        log_error("Couldn't start the AFS async read for file %d in '%s': %s",
+                  request->file_num,
+                  afs.file_path,
+                  SDL_GetError());
         request->state = AFS_READ_STATE_ERROR;
         request_asyncio_close(request);
         return;

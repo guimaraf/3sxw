@@ -61,19 +61,6 @@ License: GNU Lesser General Public License (LGPL), version 2.1 or later, as prov
 Copyright:
 - Copyright (C) FFmpeg contributors.
 
-GekkoNet
-------
-Project: GekkoNet
-Upstream: https://github.com/HeatXD/GekkoNet
-
-3SX links against:
-- libGekkoNet
-
-License: BSD 2-Clause, as provided by Jamie Meyer.
-
-Copyright:
-- Copyright (C) Jamie Meyer.
-
 argparse
 ------
 Project: argparse

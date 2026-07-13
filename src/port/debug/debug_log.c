@@ -107,8 +107,6 @@ static double worst_adx_start_mem_ms = 0.0;
 static double worst_adx_entry_afs_ms = 0.0;
 static double worst_adx_start_afs_ms = 0.0;
 static double worst_adx_load_file_ms = 0.0;
-static double worst_netplay_screen_render_ms = 0.0;
-static double worst_netstats_render_ms = 0.0;
 static double worst_game_renderer_render_ms = 0.0;
 static double worst_screenshot_ms = 0.0;
 static double worst_screen_copy_ms = 0.0;
@@ -126,8 +124,6 @@ static Uint64 worst_adx_start_mem_frame = 0;
 static Uint64 worst_adx_entry_afs_frame = 0;
 static Uint64 worst_adx_start_afs_frame = 0;
 static Uint64 worst_adx_load_file_frame = 0;
-static Uint64 worst_netplay_screen_render_frame = 0;
-static Uint64 worst_netstats_render_frame = 0;
 static Uint64 worst_game_renderer_render_frame = 0;
 static Uint64 worst_screenshot_frame = 0;
 static Uint64 worst_screen_copy_frame = 0;
@@ -400,12 +396,6 @@ static void write_summary_file() {
     fprintf(file, "total_input_press_events=%llu\n", (unsigned long long)total_input_press_events);
     fprintf(file, "total_input_release_events=%llu\n", (unsigned long long)total_input_release_events);
     fprintf(file, "max_input_held_frames=%u\n", (unsigned int)max_input_held_frames);
-    fprintf(file, "worst_netplay_screen_render_ms=%.3f\n", worst_netplay_screen_render_ms);
-    fprintf(file,
-            "worst_netplay_screen_render_frame=%llu\n",
-            (unsigned long long)worst_netplay_screen_render_frame);
-    fprintf(file, "worst_netstats_render_ms=%.3f\n", worst_netstats_render_ms);
-    fprintf(file, "worst_netstats_render_frame=%llu\n", (unsigned long long)worst_netstats_render_frame);
     fprintf(file, "worst_game_renderer_render_ms=%.3f\n", worst_game_renderer_render_ms);
     fprintf(file,
             "worst_game_renderer_render_frame=%llu\n",
@@ -564,8 +554,6 @@ static void reset_frame_timing_stats() {
     worst_render_sort_frame = 0;
     worst_render_geometry_frame = 0;
     worst_adx_process_ms = 0.0;
-    worst_netplay_screen_render_ms = 0.0;
-    worst_netstats_render_ms = 0.0;
     worst_game_renderer_render_ms = 0.0;
     worst_screenshot_ms = 0.0;
     worst_screen_copy_ms = 0.0;
@@ -589,8 +577,6 @@ static void reset_frame_timing_stats() {
     worst_adx_entry_afs_frame = 0;
     worst_adx_start_afs_frame = 0;
     worst_adx_load_file_frame = 0;
-    worst_netplay_screen_render_frame = 0;
-    worst_netstats_render_frame = 0;
     worst_game_renderer_render_frame = 0;
     worst_screenshot_frame = 0;
     worst_screen_copy_frame = 0;
@@ -653,7 +639,7 @@ static void open_render_stats_file() {
             "release_cache_invalidated_textures,indexed_texture_updates,indexed_texture_update_pixels,"
             "indexed_texture_update_ms,indexed_palette_updates,indexed_palette_update_ms,"
             "indexed_texture_rgba_fallbacks,render_sort_ms,render_geometry_ms,adx_process_ms,"
-            "netplay_screen_render_ms,netstats_render_ms,game_renderer_render_ms,screenshot_ms,"
+            "game_renderer_render_ms,screenshot_ms,"
             "screen_copy_ms,debug_text_ms,present_ms,cleanup_ms,cursor_ms,pacing_ms,"
             "pacing_overhead_ms,sleep_overrun_ms\n");
 }
@@ -668,7 +654,7 @@ static void open_step_stats_file() {
     fprintf(step_stats_file,
             "frame,afs_run_server_ms,setup_temp_priority_ms,pad_get_all_ms,key_convert_ms,"
             "test_prologue_ms,input_copy_ms,game_main_ms,nj_user_main_ms,seqs_before_process_ms,"
-            "njdp2d_draw_ms,seqs_after_process_ms,netplay_tick_ms,knj_flush_ms,disp_effect_work_ms,"
+            "njdp2d_draw_ms,seqs_after_process_ms,knj_flush_ms,disp_effect_work_ms,"
             "fl_flip_ms,scrn_renew_ms,irl_family_ms,irl_scrn_ms,bgm_server_ms,spu_upload_count,"
             "spu_upload_bytes,spu_upload_ms,cse_exec_server_count,cse_exec_server_ms,"
             "cse_tsb_request_count,cse_tsb_request_ms,cse_send_bd_to_spu_count,"
@@ -1113,7 +1099,7 @@ void DebugLog_RecordStepStats(const DebugStepStats* stats) {
     if (step_stats_file != NULL) {
         fprintf(step_stats_file,
                 "%llu,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,"
-                "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%llu,%.3f,%d,%.3f,%d,%.3f,%d,%llu,%.3f\n",
+                "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%llu,%.3f,%d,%.3f,%d,%.3f,%d,%llu,%.3f\n",
                 (unsigned long long)stats->frame,
                 stats->afs_run_server_ms,
                 stats->setup_temp_priority_ms,
@@ -1126,7 +1112,6 @@ void DebugLog_RecordStepStats(const DebugStepStats* stats) {
                 stats->seqs_before_process_ms,
                 stats->njdp2d_draw_ms,
                 stats->seqs_after_process_ms,
-                stats->netplay_tick_ms,
                 stats->knj_flush_ms,
                 stats->disp_effect_work_ms,
                 stats->fl_flip_ms,
@@ -1161,7 +1146,6 @@ void DebugLog_RecordStepStats(const DebugStepStats* stats) {
     write_spike_event(stats->frame, "seqs_before_process_spike_ms", stats->seqs_before_process_ms);
     write_spike_event(stats->frame, "njdp2d_draw_spike_ms", stats->njdp2d_draw_ms);
     write_spike_event(stats->frame, "seqs_after_process_spike_ms", stats->seqs_after_process_ms);
-    write_spike_event(stats->frame, "netplay_tick_spike_ms", stats->netplay_tick_ms);
     write_spike_event(stats->frame, "knj_flush_spike_ms", stats->knj_flush_ms);
     write_spike_event(stats->frame, "disp_effect_work_spike_ms", stats->disp_effect_work_ms);
     write_spike_event(stats->frame, "fl_flip_spike_ms", stats->fl_flip_ms);
@@ -1445,7 +1429,7 @@ void DebugLog_RecordRenderStats(const DebugRenderStats* stats) {
     if (render_stats_file != NULL) {
         fprintf(render_stats_file,
                 "%llu,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%.3f,%d,%.3f,%d,%.3f,%.3f,"
-                "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n",
+                "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n",
                 (unsigned long long)stats->frame,
                 stats->render_tasks,
                 stats->geometry_calls,
@@ -1469,8 +1453,6 @@ void DebugLog_RecordRenderStats(const DebugRenderStats* stats) {
                 stats->render_sort_ms,
                 stats->render_geometry_ms,
                 stats->adx_process_ms,
-                stats->netplay_screen_render_ms,
-                stats->netstats_render_ms,
                 stats->game_renderer_render_ms,
                 stats->screenshot_ms,
                 stats->screen_copy_ms,
@@ -1624,12 +1606,6 @@ void DebugLog_RecordRenderStats(const DebugRenderStats* stats) {
     update_worst_ms(stats->render_sort_ms, stats->frame, &worst_render_sort_ms, &worst_render_sort_frame);
     update_worst_ms(stats->render_geometry_ms, stats->frame, &worst_render_geometry_ms, &worst_render_geometry_frame);
     update_worst_ms(stats->adx_process_ms, stats->frame, &worst_adx_process_ms, &worst_adx_process_frame);
-    update_worst_ms(stats->netplay_screen_render_ms,
-                    stats->frame,
-                    &worst_netplay_screen_render_ms,
-                    &worst_netplay_screen_render_frame);
-    update_worst_ms(
-        stats->netstats_render_ms, stats->frame, &worst_netstats_render_ms, &worst_netstats_render_frame);
     update_worst_ms(stats->game_renderer_render_ms,
                     stats->frame,
                     &worst_game_renderer_render_ms,
@@ -1652,8 +1628,6 @@ void DebugLog_RecordRenderStats(const DebugRenderStats* stats) {
     }
 
     write_spike_event(stats->frame, "adx_process_spike_ms", stats->adx_process_ms);
-    write_spike_event(stats->frame, "netplay_screen_render_spike_ms", stats->netplay_screen_render_ms);
-    write_spike_event(stats->frame, "netstats_render_spike_ms", stats->netstats_render_ms);
     write_spike_event(stats->frame, "game_renderer_render_spike_ms", stats->game_renderer_render_ms);
     write_spike_event(stats->frame, "screenshot_spike_ms", stats->screenshot_ms);
     write_spike_event(stats->frame, "screen_copy_spike_ms", stats->screen_copy_ms);

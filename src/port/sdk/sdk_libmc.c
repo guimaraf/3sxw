@@ -78,6 +78,8 @@ static ReadWriteOperation rw_operation = { 0 };
 static GetDirOperation get_dir_operation = { 0 };
 static PathOperation mkdir_operation = { 0 };
 static PathOperation delete_operation = { 0 };
+static int format_operation_result = sceMcResSucceed;
+static int unformat_operation_result = sceMcResDeniedPermit;
 static int registered_operation = 0;
 
 static OpenFile open_files[MAX_OPEN_FILES] = { { 0 } };
@@ -295,6 +297,14 @@ static void finalize_delete(int* result) {
     *result = SDL_RemovePath(delete_operation.path) ? sceMcResSucceed : sceMcResDeniedPermit;
 }
 
+static void finalize_format(int* result) {
+    *result = format_operation_result;
+}
+
+static void finalize_unformat(int* result) {
+    *result = unformat_operation_result;
+}
+
 typedef struct {
     int maxent;
     int count;
@@ -489,6 +499,8 @@ int sceMcInit(void) {
     finalizers[sceMcFuncNoMkdir] = finalize_mkdir;
     finalizers[sceMcFuncNoDelete] = finalize_delete;
     finalizers[sceMcFuncNoGetDir] = finalize_get_dir;
+    finalizers[sceMcFuncNoFormat] = finalize_format;
+    finalizers[sceMcFuncNoUnformat] = finalize_unformat;
     return sceMcIniSucceed;
 }
 
@@ -636,12 +648,16 @@ int sceMcDelete(int port, int slot, const char* name) {
 }
 
 int sceMcFormat(int port, int slot) {
-    not_implemented(__func__);
+    registered_operation = sceMcFuncNoFormat;
+    char* root_path = get_mc_root_path(port);
+    format_operation_result = root_path != NULL ? sceMcResSucceed : sceMcResDeniedPermit;
+    SDL_free(root_path);
     return 0;
 }
 
 int sceMcUnformat(int port, int slot) {
-    not_implemented(__func__);
+    registered_operation = sceMcFuncNoUnformat;
+    unformat_operation_result = sceMcResDeniedPermit;
     return 0;
 }
 

@@ -15,7 +15,6 @@
 #include <math.h>
 #include <limits.h>
 #include <stddef.h>
-#include <stdio.h>
 #include <stdlib.h>
 
 #define SAMPLE_RATE 48000
@@ -122,14 +121,14 @@ static bool pipeline_init(ADXDecoderPipeline* pipeline) {
     const AVCodec* codec = avcodec_find_decoder(AV_CODEC_ID_ADPCM_ADX);
 
     if (codec == NULL) {
-        SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "ADX decoder is unavailable in FFmpeg.");
+        log_error("ADX decoder is unavailable in FFmpeg.");
         return false;
     }
 
     pipeline->context = avcodec_alloc_context3(codec);
 
     if (pipeline->context == NULL) {
-        SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "Couldn't allocate the ADX decoder context.");
+        log_error("Couldn't allocate the ADX decoder context.");
         return false;
     }
 
@@ -143,7 +142,7 @@ static bool pipeline_init(ADXDecoderPipeline* pipeline) {
     pipeline->parser_context = av_parser_init(codec->id);
 
     if (pipeline->parser_context == NULL) {
-        SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "Couldn't allocate the ADX parser.");
+        log_error("Couldn't allocate the ADX parser.");
         pipeline_destroy(pipeline);
         return false;
     }
@@ -175,7 +174,7 @@ static bool pipeline_init(ADXDecoderPipeline* pipeline) {
     pipeline->frame = av_frame_alloc();
 
     if (pipeline->packet == NULL || pipeline->frame == NULL) {
-        SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "Couldn't allocate ADX decoder buffers.");
+        log_error("Couldn't allocate ADX decoder buffers.");
         pipeline_destroy(pipeline);
         return false;
     }
@@ -254,7 +253,7 @@ static void retire_buffer(AFSHandle handle, uint8_t* data, size_t capacity) {
     }
 
     if (retired_buffer_count >= SDL_arraysize(retired_buffers)) {
-        SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "ADX retired buffer queue is full; preserving the buffer until process exit.");
+        log_error("ADX retired buffer queue is full; preserving the buffer until process exit.");
         return;
     }
 
@@ -292,9 +291,7 @@ static void release_retired_buffers(bool wait_for_all) {
     } while (SDL_GetTicks() < timeout_at);
 
     if (wait_for_all && retired_buffer_count > 0) {
-        SDL_LogError(SDL_LOG_CATEGORY_AUDIO,
-                     "Timed out waiting for %d canceled ADX reads during shutdown.",
-                     retired_buffer_count);
+        log_error("Timed out waiting for %d canceled ADX reads during shutdown.", retired_buffer_count);
     }
 }
 
@@ -314,7 +311,7 @@ static void* load_file(int file_id, int* size) {
     *size = file_size;
 
     if (file_size == 0) {
-        SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "ADX resource %d is empty or unavailable.", file_id);
+        log_error("ADX resource %d is empty or unavailable.", file_id);
         return NULL;
     }
 
@@ -323,7 +320,7 @@ static void* load_file(int file_id, int* size) {
     const int sectors = fsCalSectorSize(file_size);
 
     if (buff == NULL) {
-        SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "Couldn't allocate %zu bytes for ADX resource %d.", buff_size, file_id);
+        log_error("Couldn't allocate %zu bytes for ADX resource %d.", buff_size, file_id);
         return NULL;
     }
 
@@ -344,7 +341,7 @@ static void* load_file(int file_id, int* size) {
     AFS_Close(handle);
 
     if (read_state != AFS_READ_STATE_FINISHED) {
-        SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "Couldn't read ADX resource %d from the AFS archive.", file_id);
+        log_error("Couldn't read ADX resource %d from the AFS archive.", file_id);
         free(buff);
         *size = 0;
         return NULL;
@@ -360,7 +357,7 @@ static void* load_file(int file_id, int* size) {
 static void print_av_error(int errnum) {
     char errbuf[AV_ERROR_MAX_STRING_SIZE] = { 0 };
     av_strerror(errnum, errbuf, sizeof(errbuf));
-    fprintf(stderr, "FFmpeg error: %s\n", errbuf);
+    log_error("FFmpeg error: %s", errbuf);
 }
 
 static bool track_reached_eof(ADXTrack* track) {
@@ -467,14 +464,14 @@ static bool loop_info_init(ADXLoopInfo* info, const uint8_t* data, size_t data_s
         break;
 
     default:
-        SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "Unsupported ADX version: %d.", version);
+        log_error("Unsupported ADX version: %d.", version);
         return false;
     }
 
     if (info->looping_enabled) {
         if (info->end_sample <= info->start_sample ||
             (info->end_sample - info->start_sample) > (INT_MAX / (BYTES_PER_SAMPLE * N_CHANNELS))) {
-            SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "Invalid ADX loop boundaries.");
+            log_error("Invalid ADX loop boundaries.");
             return false;
         }
 
@@ -482,7 +479,7 @@ static bool loop_info_init(ADXLoopInfo* info, const uint8_t* data, size_t data_s
         info->data = malloc(info->data_size);
 
         if (info->data == NULL) {
-            SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "Couldn't allocate the ADX loop buffer.");
+            log_error("Couldn't allocate the ADX loop buffer.");
             SDL_zerop(info);
             return false;
         }
@@ -506,7 +503,7 @@ static void fail_track(ADXTrack* track, const char* operation, int ffmpeg_error)
         print_av_error(ffmpeg_error);
     }
 
-    SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "ADX playback failed while %s.", operation);
+    log_error("ADX playback failed while %s.", operation);
     track->failed = true;
 }
 
@@ -773,7 +770,7 @@ static void queue_afs_track(int file_id, bool looping_allowed) {
     const unsigned int file_size = fsGetFileSize(file_id);
 
     if (file_size == 0) {
-        SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "ADX resource %d is empty or unavailable.", file_id);
+        log_error("ADX resource %d is empty or unavailable.", file_id);
         return;
     }
 
@@ -892,7 +889,7 @@ bool ADX_Init() {
     stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
 
     if (stream == NULL) {
-        SDL_Log("Couldn't create the ADX music stream; music will be disabled: %s", SDL_GetError());
+        log_error("Couldn't create the ADX music stream; music will be disabled: %s", SDL_GetError());
         return false;
     }
 
@@ -960,7 +957,7 @@ void ADX_StartMem(void* buf, size_t size) {
     ADXTrack* track = alloc_track();
 
     if (track == NULL) {
-        SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "No ADX track slot is available.");
+        log_error("No ADX track slot is available.");
         return;
     }
 

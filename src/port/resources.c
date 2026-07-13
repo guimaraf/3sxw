@@ -1,5 +1,6 @@
 #include "port/resources.h"
 #include "port/paths.h"
+#include "port/utils.h"
 #include "utils/sha256.h"
 
 #include <SDL3/SDL.h>
@@ -10,7 +11,7 @@
 #define CHUNK_SECTORS 16
 #define BUFFER_SIZE (ISO_BLOCKSIZE * CHUNK_SECTORS)
 
-typedef enum FlowState { INIT, DIALOG_OPENED, COPY_ERROR, COPY_SUCCESS } ResourceCopyingFlowState;
+typedef enum FlowState { INIT, DIALOG_OPENED, COPY_ERROR, COPY_FATAL_ERROR, COPY_SUCCESS, COPY_CANCELED } ResourceCopyingFlowState;
 typedef enum DialogResult { DIALOG_RESULT_NONE, DIALOG_RESULT_SELECTED, DIALOG_RESULT_CANCELED, DIALOG_RESULT_ERROR } DialogResult;
 
 static ResourceCopyingFlowState flow_state = INIT;
@@ -21,6 +22,8 @@ static SDL_Mutex* dialog_result_mutex = NULL;
 static DialogResult dialog_result = DIALOG_RESULT_NONE;
 static char* selected_iso_path = NULL;
 static char dialog_error[ERROR_LEN_MAX] = { 0 };
+static bool dialog_callback_pending = false;
+static bool shutdown_requested = false;
 static const SDL_DialogFileFilter iso_dialog_filter = { .name = "Game ISO", .pattern = "iso" };
 
 static void create_dialog_parent_window() {
@@ -96,6 +99,14 @@ static void open_file_dialog_callback(void* userdata, const char* const* filelis
     }
 
     SDL_LockMutex(dialog_result_mutex);
+    dialog_callback_pending = false;
+
+    if (shutdown_requested) {
+        SDL_UnlockMutex(dialog_result_mutex);
+        SDL_free(iso_path);
+        return;
+    }
+
     SDL_free(selected_iso_path);
     selected_iso_path = iso_path;
     dialog_result = result;
@@ -228,7 +239,7 @@ static void open_dialog() {
 
         if (dialog_result_mutex == NULL) {
             SDL_snprintf(error, ERROR_LEN_MAX, "Failed to initialize the ISO selection dialog:\n\n%s", SDL_GetError());
-            flow_state = COPY_ERROR;
+            flow_state = COPY_FATAL_ERROR;
             return;
         }
     }
@@ -238,6 +249,8 @@ static void open_dialog() {
     selected_iso_path = NULL;
     dialog_result = DIALOG_RESULT_NONE;
     dialog_error[0] = '\0';
+    dialog_callback_pending = true;
+    shutdown_requested = false;
     SDL_UnlockMutex(dialog_result_mutex);
 
     flow_state = DIALOG_OPENED;
@@ -272,16 +285,12 @@ static void process_dialog_result() {
         break;
 
     case DIALOG_RESULT_CANCELED:
-        SDL_snprintf(error,
-                     ERROR_LEN_MAX,
-                     "ISO selection was canceled. The required resource is still missing:\n%s",
-                     Resources_GetAFSPath());
-        flow_state = COPY_ERROR;
+        flow_state = COPY_CANCELED;
         break;
 
     case DIALOG_RESULT_ERROR:
         SDL_strlcpy(error, result_error, sizeof(error));
-        flow_state = COPY_ERROR;
+        flow_state = COPY_FATAL_ERROR;
         break;
     }
 
@@ -351,7 +360,7 @@ bool Resources_Check() {
 #endif
 }
 
-bool Resources_RunResourceCopyingFlow() {
+ResourcesFlowResult Resources_RunResourceCopyingFlow() {
     switch (flow_state) {
     case INIT:
         create_dialog_parent_window();
@@ -373,9 +382,31 @@ bool Resources_RunResourceCopyingFlow() {
         break;
 
     case COPY_ERROR:
+        log_error("Resource copy failed: %s", error);
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", error, dialog_owner_window);
         open_dialog();
         break;
+
+    case COPY_FATAL_ERROR:
+        char fatal_message[ERROR_LEN_MAX + 128];
+        log_error("Fatal resource selection error: %s", error);
+        SDL_snprintf(fatal_message, sizeof(fatal_message), "%s\n\nThe game will now close.", error);
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Resource error", fatal_message, dialog_owner_window);
+        Resources_Quit();
+        flow_state = INIT;
+        return RESOURCES_FLOW_EXIT_REQUESTED;
+
+    case COPY_CANCELED:
+        char canceled_message[ERROR_LEN_MAX];
+        SDL_snprintf(canceled_message,
+                     sizeof(canceled_message),
+                     "The required SF33RD.AFS file was not selected:\n%s\n\nThe game will now close.",
+                     Resources_GetAFSPath());
+        SDL_ShowSimpleMessageBox(
+            SDL_MESSAGEBOX_INFORMATION, "Resource selection canceled", canceled_message, dialog_owner_window);
+        Resources_Quit();
+        flow_state = INIT;
+        return RESOURCES_FLOW_EXIT_REQUESTED;
 
     case COPY_SUCCESS:
         char* resources_path = Resources_GetPath(NULL);
@@ -385,14 +416,36 @@ bool Resources_RunResourceCopyingFlow() {
             SDL_MESSAGEBOX_INFORMATION, "Resources copied successfully", message, dialog_owner_window);
         SDL_free(resources_path);
         SDL_free(message);
-        destroy_dialog_owner_window();
-        SDL_DestroyMutex(dialog_result_mutex);
-        dialog_result_mutex = NULL;
+        Resources_Quit();
         flow_state = INIT;
-        return true;
+        return RESOURCES_FLOW_READY;
     }
 
-    return false;
+    return RESOURCES_FLOW_IN_PROGRESS;
+}
+
+void Resources_Quit() {
+    bool callback_pending = false;
+
+    if (dialog_result_mutex != NULL) {
+        SDL_LockMutex(dialog_result_mutex);
+        shutdown_requested = true;
+        callback_pending = dialog_callback_pending;
+        SDL_free(selected_iso_path);
+        selected_iso_path = NULL;
+        dialog_result = DIALOG_RESULT_NONE;
+        dialog_error[0] = '\0';
+        SDL_UnlockMutex(dialog_result_mutex);
+
+        if (!callback_pending) {
+            SDL_DestroyMutex(dialog_result_mutex);
+            dialog_result_mutex = NULL;
+        }
+    }
+
+    if (!callback_pending) {
+        destroy_dialog_owner_window();
+    }
 }
 
 const char* Resources_GetAFSPath() {

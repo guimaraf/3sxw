@@ -211,6 +211,7 @@ static void cleanup() {
     DebugLog_Shutdown();
     SDL_free(main_command_line);
     main_command_line = NULL;
+    Resources_Quit();
     SDLApp_Quit();
 }
 
@@ -606,15 +607,17 @@ static int loop() {
 
             SDL_Delay(16);
 
-            const bool resource_flow_ended = Resources_RunResourceCopyingFlow();
+            const ResourcesFlowResult resource_result = Resources_RunResourceCopyingFlow();
 
-            if (resource_flow_ended) {
+            if (resource_result == RESOURCES_FLOW_READY) {
                 if (initialize_game()) {
                     phase = MAIN_PHASE_INITIALIZED;
                 } else {
                     exit_code = 1;
                     is_running = false;
                 }
+            } else if (resource_result == RESOURCES_FLOW_EXIT_REQUESTED) {
+                is_running = false;
             }
 
             break;
@@ -717,8 +720,6 @@ static int loop() {
                 .render_sort_ms = app_frame_timing.render_stats.render_sort_ms,
                 .render_geometry_ms = app_frame_timing.render_stats.render_geometry_ms,
                 .adx_process_ms = app_frame_timing.adx_process_ms,
-                .netplay_screen_render_ms = app_frame_timing.netplay_screen_render_ms,
-                .netstats_render_ms = app_frame_timing.netstats_render_ms,
                 .game_renderer_render_ms = app_frame_timing.game_renderer_render_ms,
                 .screenshot_ms = app_frame_timing.screenshot_ms,
                 .screen_copy_ms = app_frame_timing.screen_copy_ms,

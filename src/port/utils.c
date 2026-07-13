@@ -19,11 +19,8 @@
 
 #define BACKTRACE_MAX 100
 
-static void report_critical_error(const char* fmt, va_list args) {
-    char message[1024];
-    vsnprintf(message, sizeof(message), fmt, args);
-
-    fprintf(stderr, "Critical error: %s\n", message);
+static void write_error_log(const char* prefix, const char* message) {
+    fprintf(stderr, "%s: %s\n", prefix, message);
 
     char log_path[512];
     FILE* log_f = NULL;
@@ -35,11 +32,28 @@ static void report_critical_error(const char* fmt, va_list args) {
     }
 
     if (log_f != NULL) {
-        fprintf(log_f, "Critical error: %s\n", message);
+        fprintf(log_f, "%s: %s\n", prefix, message);
         fclose(log_f);
     }
+}
+
+static void report_critical_error(const char* fmt, va_list args) {
+    char message[1024];
+    vsnprintf(message, sizeof(message), fmt, args);
+
+    write_error_log("Critical error", message);
 
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "3SX - Critical error", message, NULL);
+}
+
+void log_error(const char* fmt, ...) {
+    char message[1024];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(message, sizeof(message), fmt, args);
+    va_end(args);
+
+    write_error_log("Error", message);
 }
 
 void critical_error(const char* fmt, ...) {

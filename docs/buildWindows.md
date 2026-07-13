@@ -54,7 +54,7 @@ If you prefer the root shortcut, you can also run:
 bash build-deps.sh
 ```
 
-These scripts prepare FFmpeg, SDL3, GekkoNet, SDL3_net, libcdio, minizip-ng, and tf-psa-crypto in `third_party/`.
+These scripts prepare FFmpeg, SDL3, libcdio, minizip-ng, and tf-psa-crypto in `third_party/`.
 
 ## 3. Configure and build
 
@@ -174,7 +174,7 @@ Se preferir usar o atalho da raiz, voce tambem pode rodar:
 bash build-deps.sh
 ```
 
-Esses scripts preparam FFmpeg, SDL3, GekkoNet, SDL3_net, libcdio, minizip-ng e tf-psa-crypto em `third_party/`.
+Esses scripts preparam FFmpeg, SDL3, libcdio, minizip-ng e tf-psa-crypto em `third_party/`.
 
 ## 3. Configure e compile
 

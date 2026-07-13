@@ -29,7 +29,7 @@ If you prefer the root shortcut, you can also run:
 bash build-deps.sh
 ```
 
-These scripts prepare FFmpeg, SDL3, GekkoNet, SDL3_net, libcdio, minizip-ng, and tf-psa-crypto in `third_party/`.
+These scripts prepare FFmpeg, SDL3, libcdio, minizip-ng, and tf-psa-crypto in `third_party/`.
 
 ## 3. Configure and build
 
@@ -78,6 +78,12 @@ Final path:
 build/application/resources/SF33RD.AFS
 ```
 
+## Native hardware validation status
+
+Compilation and runtime validation on real Linux hardware are still pending. The build scripts have been reviewed statically, but the complete game flow must be tested on a native Linux machine before this platform is considered validated.
+
+Pending checks include startup, ISO selection and cancellation, `SF33RD.AFS` extraction, portable writes, `error.log`, MC1/MC2 saves, replays, audio, input, window behavior, shutdown and shared-library resolution.
+
 ---
 
 # Guia de Compilacao: Linux
@@ -111,7 +117,7 @@ Se preferir usar o atalho da raiz, voce tambem pode rodar:
 bash build-deps.sh
 ```
 
-Esses scripts preparam FFmpeg, SDL3, GekkoNet, SDL3_net, libcdio, minizip-ng e tf-psa-crypto em `third_party/`.
+Esses scripts preparam FFmpeg, SDL3, libcdio, minizip-ng e tf-psa-crypto em `third_party/`.
 
 ## 3. Configure e compile
 
@@ -159,3 +165,9 @@ Caminho final:
 ```text
 build/application/resources/SF33RD.AFS
 ```
+
+## Situacao da validacao em hardware real
+
+A compilacao e a execucao em hardware Linux real ainda estao pendentes. Os scripts de build foram revisados estaticamente, mas o fluxo completo do jogo precisa ser testado em uma maquina Linux nativa antes que esta plataforma seja considerada validada.
+
+Os testes pendentes incluem inicializacao, selecao e cancelamento da ISO, extracao do `SF33RD.AFS`, escrita portatil, `error.log`, saves no MC1/MC2, replays, audio, input, comportamento da janela, encerramento e resolucao das bibliotecas compartilhadas.
