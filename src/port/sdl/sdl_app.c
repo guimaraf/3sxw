@@ -3,20 +3,16 @@
 #include "port/config/config.h"
 #include "port/config/keymap.h"
 #include "port/debug/debug_log.h"
-#include "port/paths.h"
 #include "port/sdl/sdl_debug_text.h"
 #include "port/sdl/sdl_game_renderer.h"
 #include "port/sdl/sdl_message_renderer.h"
 #include "port/sdl/sdl_pad.h"
+#include "port/sdl/sdl_screenshot.h"
 #include "port/sound/adx.h"
 #include "port/utils.h"
 #include "sf33rd/AcrSDK/ps2/foundaps2.h"
 
 #include <SDL3/SDL.h>
-#include <libavcodec/avcodec.h>
-#include <libavutil/error.h>
-#include <libavutil/frame.h>
-#include <libavutil/pixfmt.h>
 #include <limits.h>
 
 #define FRAME_END_TIMES_MAX 30
@@ -52,6 +48,7 @@ static bool pause_requested = false;
 static bool has_input_focus = true;
 static bool config_initialized = false;
 static bool pads_initialized = false;
+static bool screenshots_initialized = false;
 static Uint64 last_mouse_motion_time = 0;
 static const int mouse_hide_delay_ms = 2000; // 2 seconds
 
@@ -242,6 +239,12 @@ bool SDLApp_FullInit() {
         return false;
     }
 
+    screenshots_initialized = SDLScreenshot_Init();
+
+    if (!screenshots_initialized) {
+        log_error("JPEG screenshots are unavailable because the screenshot worker could not be initialized.");
+    }
+
     // Initialize pads
     SDLPad_Init();
     pads_initialized = true;
@@ -274,6 +277,11 @@ void SDLApp_WriteDebugSessionInfo() {
 }
 
 void SDLApp_Quit() {
+    if (screenshots_initialized) {
+        SDLScreenshot_Quit();
+        screenshots_initialized = false;
+    }
+
     if (pads_initialized) {
         SDLPad_Quit();
         pads_initialized = false;
@@ -494,249 +502,36 @@ static void update_fps() {
     fps = 1000 / average_frame_time_ms;
 }
 
-static Uint8 clamp_color_component(int value) {
-    if (value < 0) {
-        return 0;
-    }
-
-    if (value > 255) {
-        return 255;
-    }
-
-    return (Uint8)value;
-}
-
-static void log_jpeg_error(const char* operation, const char* filename, int error_code) {
-    char error_text[AV_ERROR_MAX_STRING_SIZE];
-    av_strerror(error_code, error_text, sizeof(error_text));
-    log_error("Couldn't %s for screenshot %s: %s", operation, filename, error_text);
-}
-
-static bool save_surface_as_jpeg(SDL_Surface* surface, const char* filename) {
-    bool saved = false;
-    bool file_created = false;
-    SDL_Surface* rgb_surface = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGB24);
-    AVCodecContext* codec_context = NULL;
-    AVFrame* frame = NULL;
-    AVPacket* packet = NULL;
-    SDL_IOStream* output = NULL;
-
-    if (rgb_surface == NULL) {
-        log_error("Couldn't convert screenshot %s to RGB: %s", filename, SDL_GetError());
-        goto cleanup;
-    }
-
-    const AVCodec* codec = avcodec_find_encoder(AV_CODEC_ID_MJPEG);
-
-    if (codec == NULL) {
-        log_error("Couldn't find the MJPEG encoder for screenshot %s.", filename);
-        goto cleanup;
-    }
-
-    codec_context = avcodec_alloc_context3(codec);
-
-    if (codec_context == NULL) {
-        log_error("Couldn't allocate the JPEG encoder for screenshot %s.", filename);
-        goto cleanup;
-    }
-
-    codec_context->width = rgb_surface->w;
-    codec_context->height = rgb_surface->h;
-    codec_context->pix_fmt = AV_PIX_FMT_YUVJ444P;
-    codec_context->time_base = (AVRational){1, 1};
-    codec_context->color_range = AVCOL_RANGE_JPEG;
-    codec_context->colorspace = AVCOL_SPC_BT470BG;
-    codec_context->flags |= AV_CODEC_FLAG_QSCALE;
-    codec_context->global_quality = 2 * FF_QP2LAMBDA;
-
-    int result = avcodec_open2(codec_context, codec, NULL);
-
-    if (result < 0) {
-        log_jpeg_error("initialize the JPEG encoder", filename, result);
-        goto cleanup;
-    }
-
-    frame = av_frame_alloc();
-
-    if (frame == NULL) {
-        log_error("Couldn't allocate a JPEG frame for screenshot %s.", filename);
-        goto cleanup;
-    }
-
-    frame->format = codec_context->pix_fmt;
-    frame->width = codec_context->width;
-    frame->height = codec_context->height;
-    frame->color_range = codec_context->color_range;
-    frame->colorspace = codec_context->colorspace;
-    frame->quality = codec_context->global_quality;
-
-    result = av_frame_get_buffer(frame, 32);
-
-    if (result < 0) {
-        log_jpeg_error("allocate the JPEG pixel buffer", filename, result);
-        goto cleanup;
-    }
-
-    for (int y = 0; y < rgb_surface->h; y++) {
-        const Uint8* source_row = (const Uint8*)rgb_surface->pixels + (y * rgb_surface->pitch);
-        Uint8* y_row = frame->data[0] + (y * frame->linesize[0]);
-        Uint8* u_row = frame->data[1] + (y * frame->linesize[1]);
-        Uint8* v_row = frame->data[2] + (y * frame->linesize[2]);
-
-        for (int x = 0; x < rgb_surface->w; x++) {
-            const int red = source_row[(x * 3) + 0];
-            const int green = source_row[(x * 3) + 1];
-            const int blue = source_row[(x * 3) + 2];
-
-            y_row[x] = clamp_color_component((77 * red + 150 * green + 29 * blue + 128) >> 8);
-            u_row[x] = clamp_color_component(((-43 * red - 85 * green + 128 * blue + 128) >> 8) + 128);
-            v_row[x] = clamp_color_component(((128 * red - 107 * green - 21 * blue + 128) >> 8) + 128);
-        }
-    }
-
-    packet = av_packet_alloc();
-
-    if (packet == NULL) {
-        log_error("Couldn't allocate the encoded JPEG data for screenshot %s.", filename);
-        goto cleanup;
-    }
-
-    result = avcodec_send_frame(codec_context, frame);
-
-    if (result < 0) {
-        log_jpeg_error("encode the JPEG frame", filename, result);
-        goto cleanup;
-    }
-
-    result = avcodec_receive_packet(codec_context, packet);
-
-    if (result < 0) {
-        log_jpeg_error("receive the encoded JPEG data", filename, result);
-        goto cleanup;
-    }
-
-    output = SDL_IOFromFile(filename, "wb");
-
-    if (output == NULL) {
-        log_error("Couldn't open screenshot %s for writing: %s", filename, SDL_GetError());
-        goto cleanup;
-    }
-
-    file_created = true;
-    const size_t packet_size = (size_t)packet->size;
-
-    if (SDL_WriteIO(output, packet->data, packet_size) != packet_size) {
-        log_error("Couldn't write screenshot %s: %s", filename, SDL_GetError());
-        goto cleanup;
-    }
-
-    if (!SDL_CloseIO(output)) {
-        output = NULL;
-        log_error("Couldn't finish writing screenshot %s: %s", filename, SDL_GetError());
-        goto cleanup;
-    }
-
-    output = NULL;
-    saved = true;
-
-cleanup:
-    if (output != NULL && !SDL_CloseIO(output)) {
-        log_error("Couldn't close the failed screenshot %s: %s", filename, SDL_GetError());
-    }
-
-    if (!saved && file_created && !SDL_RemovePath(filename)) {
-        log_error("Couldn't remove the incomplete screenshot %s: %s", filename, SDL_GetError());
-    }
-
-    av_packet_free(&packet);
-    av_frame_free(&frame);
-    avcodec_free_context(&codec_context);
-    SDL_DestroySurface(rgb_surface);
-    return saved;
-}
-
-static bool save_texture_as_jpeg(SDL_Texture* texture, const char* filename) {
+static bool queue_texture_screenshot(SDL_Texture* texture) {
     SDL_Texture* previous_target = SDL_GetRenderTarget(renderer);
 
     if (!SDL_SetRenderTarget(renderer, texture)) {
-        log_error("Couldn't select the screenshot render target for %s: %s", filename, SDL_GetError());
+        log_error("Couldn't select the screenshot render target: %s", SDL_GetError());
         return false;
     }
 
     SDL_Surface* rendered_surface = SDL_RenderReadPixels(renderer, NULL);
 
     if (rendered_surface == NULL) {
-        log_error("Couldn't read the screenshot pixels for %s: %s", filename, SDL_GetError());
-        if (!SDL_SetRenderTarget(renderer, previous_target)) {
-            log_error("Couldn't restore the render target after a failed screenshot: %s", SDL_GetError());
-        }
-        return false;
+        log_error("Couldn't read the screenshot pixels: %s", SDL_GetError());
     }
 
-    const bool saved = save_surface_as_jpeg(rendered_surface, filename);
-    SDL_DestroySurface(rendered_surface);
     const bool target_restored = SDL_SetRenderTarget(renderer, previous_target);
 
     if (!target_restored) {
-        log_error("Couldn't restore the render target after saving screenshot %s: %s", filename, SDL_GetError());
+        log_error("Couldn't restore the render target after capturing a screenshot: %s", SDL_GetError());
     }
 
-    if (!saved) {
-        log_error("Couldn't save screenshot %s: %s", filename, SDL_GetError());
+    if (rendered_surface == NULL) {
+        return false;
     }
 
-    return saved && target_restored;
-}
-
-static char* make_screenshot_path() {
-    const char* base_path = Paths_GetBasePath();
-
-    if (base_path == NULL) {
-        log_error("Couldn't locate the game directory for screenshot storage: %s", SDL_GetError());
-        return NULL;
+    if (!target_restored || !SDLScreenshot_Queue(rendered_surface)) {
+        SDL_DestroySurface(rendered_surface);
+        return false;
     }
 
-    char* prints_path = NULL;
-
-    if (SDL_asprintf(&prints_path, "%sprints", base_path) < 0 || prints_path == NULL) {
-        log_error("Couldn't allocate the screenshot directory path.");
-        return NULL;
-    }
-
-    if (!SDL_CreateDirectory(prints_path)) {
-        log_error("Couldn't create the screenshot directory %s: %s", prints_path, SDL_GetError());
-        SDL_free(prints_path);
-        return NULL;
-    }
-
-    SDL_Time current_time;
-    SDL_DateTime date_time;
-
-    if (!SDL_GetCurrentTime(&current_time) || !SDL_TimeToDateTime(current_time, &date_time, true)) {
-        log_error("Couldn't obtain the current date and time for the screenshot filename: %s", SDL_GetError());
-        SDL_free(prints_path);
-        return NULL;
-    }
-
-    char* screenshot_path = NULL;
-    const int milliseconds = date_time.nanosecond / 1000000;
-
-    if (SDL_asprintf(&screenshot_path,
-                     "%s/sf3_%04d-%02d-%02d_%02d-%02d-%02d-%03d.jpg",
-                     prints_path,
-                     date_time.year,
-                     date_time.month,
-                     date_time.day,
-                     date_time.hour,
-                     date_time.minute,
-                     date_time.second,
-                     milliseconds) < 0 ||
-        screenshot_path == NULL) {
-        log_error("Couldn't allocate the screenshot filename.");
-    }
-
-    SDL_free(prints_path);
-    return screenshot_path;
+    return true;
 }
 
 void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
@@ -781,13 +576,8 @@ void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
     }
 
     const Uint64 screenshot_screen_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
-    if (should_save_screenshot) {
-        char* screenshot_path = make_screenshot_path();
-
-        if (screenshot_path != NULL) {
-            save_texture_as_jpeg(screen_texture, screenshot_path);
-            SDL_free(screenshot_path);
-        }
+    if (should_save_screenshot && screenshots_initialized) {
+        queue_texture_screenshot(screen_texture);
     }
     if (timing != NULL) {
         timing->screenshot_ms += (double)(SDL_GetTicksNS() - screenshot_screen_start_ns) / 1e6;
