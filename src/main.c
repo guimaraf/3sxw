@@ -45,6 +45,7 @@
 #include "port/io/afs.h"
 #include "port/paths.h"
 #include "port/resources.h"
+#include "port/single_instance.h"
 #include "port/utils.h"
 
 #include <SDL3/SDL.h>
@@ -214,6 +215,7 @@ static void cleanup() {
     main_command_line = NULL;
     Resources_Quit();
     SDLApp_Quit();
+    SingleInstance_Release();
 }
 
 // Iteration
@@ -585,8 +587,29 @@ static int loop() {
 
     while (is_running) {
         switch (phase) {
-        case MAIN_PHASE_INIT:
+        case MAIN_PHASE_INIT: {
             if (!SDLApp_PreInit()) {
+                exit_code = 1;
+                is_running = false;
+                break;
+            }
+
+            char instance_error[512] = { 0 };
+            const SingleInstanceResult instance_result =
+                SingleInstance_Acquire(instance_error, sizeof(instance_error));
+
+            if (instance_result == SINGLE_INSTANCE_ALREADY_RUNNING) {
+                SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,
+                                         "3SX - Already running",
+                                         "3SX is already running.\n\n"
+                                         "Close the existing instance before starting the game again.",
+                                         NULL);
+                is_running = false;
+                break;
+            }
+
+            if (instance_result == SINGLE_INSTANCE_ERROR) {
+                critical_error("Couldn't establish the single-instance lock.\n\n%s", instance_error);
                 exit_code = 1;
                 is_running = false;
                 break;
@@ -625,6 +648,7 @@ static int loop() {
             }
 
             break;
+        }
 
         case MAIN_PHASE_COPYING_RESOURCES:
             is_running = sdl_poll_helper();

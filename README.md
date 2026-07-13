@@ -35,9 +35,44 @@ In the original project, save files, configuration, and other data were stored i
 | Replays | `<game folder>/data/saves/slot1/` and `<game folder>/data/saves/slot2/` |
 | Configuration | `<game folder>/data/config` |
 | Key mapping | `<game folder>/data/keymap` |
+| Critical error log | `<game folder>/data/error.log` |
+| Screenshots | `<game folder>/prints/` |
 | Game assets | `<game folder>/` (next to the `.exe`) |
 
 This makes the game 100% portable: just copy the folder to another location or computer and everything will work without reinstalling.
+
+### Input and window behavior
+
+- Press `F11` or `Alt+Enter` to switch between windowed and fullscreen modes.
+- `Alt+Enter` is suppressed from gameplay input, so it does not activate Start or add player 2 in Arcade Mode.
+- When focus is lost during gameplay, controller and keyboard states are cleared and the match enters pause as soon as gameplay resumes, including round and stage transitions.
+- Disconnecting a controller clears its previous state and preserves the existing in-game reconnect flow.
+- Analog sticks and triggers use a 25% deadzone to reduce drift without making directional inputs feel excessively long.
+- Only one game instance can run in the same operating-system session. A second launch displays an error and exits before accessing resources, saves, audio, or gameplay state.
+
+### JPEG screenshots
+
+Press `F12` to capture the current game screen. Screenshots are stored as high-quality JPEG files under `prints/`, using names in the following format:
+
+```text
+sf3_YYYY-MM-DD_HH-MM-SS-mmm.jpg
+```
+
+Pixel readback remains on the main thread as required by SDL3. RGB conversion, JPEG encoding, and disk writing run on a low-priority worker thread with a bounded queue, reducing gameplay stalls while screenshots are generated. Pending accepted captures are completed during normal shutdown, and incomplete files are removed after errors.
+
+FFmpeg dependency builds explicitly enable the MJPEG encoder used by this feature. Existing checkouts upgrading from an older dependency build must run `build.bat deps` once on Windows, or rebuild the dependencies using the platform-specific build script on Linux or macOS.
+
+### Resource validation and error handling
+
+The resource startup flow validates `SF33RD.AFS` before gameplay begins. If the file is missing, the game can extract it from a legally obtained compatible PlayStation 2 image. Invalid images are rejected with the expected filename reported in `data/error.log`; canceling resource selection now closes the game instead of reopening the dialog indefinitely.
+
+Critical runtime failures are written to the portable `data/error.log` file in Release builds. Texture, audio, resource, and screenshot failure paths include the affected file or operation whenever that information is available.
+
+### Rendering and audio stability
+
+The sprite rendering path uses bounded buffering and asynchronous queue processing to avoid the repeated creation and destruction pattern that caused micro-stuttering in the original port. Texture operations include additional validation and fail safely when a resource cannot be prepared.
+
+Audio resource reads and processing use asynchronous queues so music transitions and other I/O do not unnecessarily block the gameplay frame. Shutdown paths drain or cancel pending work before releasing their resources.
 
 ### Gill available from the start
 
@@ -72,7 +107,7 @@ Join the Discord server to discuss the project, report bugs or share your ideas.
 ## Acknowledgments
 
 This project uses:
-- [FFmpeg](https://ffmpeg.org) for ADX playback
+- [FFmpeg](https://ffmpeg.org) for ADX playback and JPEG screenshot encoding
 - [SDL3](https://github.com/libsdl-org/SDL) for window management, input handling, sound output and rendering
 - [libcdio / libiso9660](https://github.com/libcdio/libcdio) for `.iso` file reading
 - [zlib](https://zlib.net) for file decompression
@@ -119,9 +154,44 @@ No projeto original, arquivos de save, configuracoes e outros dados eram armazen
 | Replays | `<pasta do jogo>/data/saves/slot1/` e `<pasta do jogo>/data/saves/slot2/` |
 | Configuracoes | `<pasta do jogo>/data/config` |
 | Mapeamento de teclas | `<pasta do jogo>/data/keymap` |
+| Log de erros criticos | `<pasta do jogo>/data/error.log` |
+| Capturas de tela | `<pasta do jogo>/prints/` |
 | Assets do jogo | `<pasta do jogo>/` (ao lado do `.exe`) |
 
 Isso torna o jogo 100% portatil: basta copiar a pasta para outro local ou computador e tudo funcionara normalmente, sem necessidade de reinstalacao.
+
+### Comportamento de input e janela
+
+- Pressione `F11` ou `Alt+Enter` para alternar entre os modos janela e tela cheia.
+- `Alt+Enter` e suprimido do input do jogo, portanto nao ativa Start nem adiciona o jogador 2 no Arcade Mode.
+- Quando a janela perde o foco durante o gameplay, os estados do teclado e dos controles sao limpos e a partida entra em pausa assim que o gameplay comeca ou retorna, inclusive durante transicoes de round e cenario.
+- Desconectar um controle limpa seu estado anterior e preserva o fluxo de reconexao exibido pelo proprio jogo.
+- Analogicos e gatilhos usam deadzone de 25%, reduzindo drift sem deixar os comandos direcionais excessivamente longos.
+- Somente uma instancia do jogo pode ser executada na mesma sessao do sistema operacional. Uma segunda abertura exibe um erro e encerra antes de acessar recursos, saves, audio ou o estado do gameplay.
+
+### Capturas de tela em JPEG
+
+Pressione `F12` para capturar a tela atual do jogo. As imagens sao armazenadas como arquivos JPEG de alta qualidade dentro de `prints/`, usando nomes no seguinte formato:
+
+```text
+sf3_YYYY-MM-DD_HH-MM-SS-mmm.jpg
+```
+
+A leitura dos pixels permanece na thread principal, conforme exigido pelo SDL3. A conversao RGB, a codificacao JPEG e a gravacao no disco sao executadas por uma worker thread de baixa prioridade com fila limitada, reduzindo travamentos durante a criacao das imagens. Capturas aceitas e ainda pendentes sao concluidas durante o encerramento normal, e arquivos incompletos sao removidos em caso de erro.
+
+A compilacao das dependencias habilita explicitamente o encoder MJPEG do FFmpeg usado por esse recurso. Ao atualizar um checkout com dependencias antigas, execute `build.bat deps` uma vez no Windows ou recompile as dependencias usando o script especifico da plataforma no Linux ou macOS.
+
+### Validacao de recursos e tratamento de erros
+
+O fluxo de inicializacao valida o arquivo `SF33RD.AFS` antes de iniciar o gameplay. Se ele estiver ausente, o jogo pode extrai-lo de uma imagem de PlayStation 2 compativel e obtida legalmente. Imagens invalidas sao recusadas e o nome esperado e registrado em `data/error.log`; cancelar a selecao do recurso agora encerra o jogo em vez de reabrir a janela indefinidamente.
+
+Falhas criticas em runtime sao registradas no arquivo portatil `data/error.log`, inclusive em builds Release. Os tratamentos de textura, audio, recursos e capturas informam o arquivo ou a operacao afetada sempre que essa informacao estiver disponivel.
+
+### Estabilidade de renderizacao e audio
+
+O fluxo de renderizacao de sprites usa buffers limitados e processamento assincrono da fila, evitando o padrao de criacao e destruicao repetida que causava micro-stuttering no port original. Operacoes de textura possuem validacoes adicionais e falham de forma segura quando algum recurso nao pode ser preparado.
+
+Leituras e processamento de recursos de audio usam filas assincronas para que transicoes de musica e outras operacoes de I/O nao bloqueiem desnecessariamente o frame do jogo. Durante o encerramento, trabalhos pendentes sao concluidos ou cancelados antes da liberacao dos recursos.
 
 ### Gill disponivel desde o inicio
 
@@ -156,7 +226,7 @@ Junte-se ao servidor do Discord para discutir o projeto, reportar bugs ou compar
 ## Agradecimentos
 
 Este projeto usa:
-- [FFmpeg](https://ffmpeg.org) para reproducao de ADX
+- [FFmpeg](https://ffmpeg.org) para reproducao de ADX e codificacao das capturas JPEG
 - [SDL3](https://github.com/libsdl-org/SDL) para gerenciamento de janela, entrada, saida de som e renderizacao
 - [libcdio / libiso9660](https://github.com/libcdio/libcdio) para leitura de arquivos `.iso`
 - [zlib](https://zlib.net) para descompressao de arquivos
