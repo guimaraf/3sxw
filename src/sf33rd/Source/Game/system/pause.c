@@ -40,6 +40,36 @@ void Setup_Pause(struct _TASK* task_ptr);
 void Setup_Come_Out(struct _TASK* task_ptr);
 s32 Check_Play_Status(s16 PL_id);
 
+bool Pause_RequestFromPlatformEvent() {
+    if (nowSoftReset() || Game_pause == 0x81 || Allow_a_battle_f == 0 || Extra_Break != 0 || Exec_Wipe != 0 ||
+        vm_w.Access != 0 || vm_w.Request != 0) {
+        return false;
+    }
+
+    if (Mode_Type == MODE_NORMAL_TRAINING || Mode_Type == MODE_PARRY_TRAINING) {
+        if (task[TASK_MENU].condition != 1 || task[TASK_MENU].r_no[0] != 10) {
+            return false;
+        }
+
+        Pause_ID = (Champion >= 0 && Champion < 2) ? Champion : 0;
+        Setup_Tr_Pause(&task[TASK_MENU]);
+        return true;
+    }
+
+    if (Mode_Type != MODE_ARCADE && Mode_Type != MODE_VERSUS) {
+        return false;
+    }
+
+    if (task[TASK_PAUSE].condition != 1) {
+        return false;
+    }
+
+    Pause_ID = (Player_id >= 0 && Player_id < 2) ? Player_id : 0;
+    Pause_Type = 1;
+    Setup_Pause(&task[TASK_PAUSE]);
+    return true;
+}
+
 void Pause_Task(struct _TASK* task_ptr) {
     void (*Main_Jmp_Tbl[4])(struct _TASK*) = { Pause_Check, Pause_Move, Pause_Sleep, Pause_Die };
 

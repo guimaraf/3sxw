@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 
 #define INPUT_SOURCES_MAX 2
+#define INPUT_AXIS_DEADZONE (SDL_MAX_SINT16 / 4)
 
 typedef enum SDLPad_InputType { SDLPAD_INPUT_NONE = 0, SDLPAD_INPUT_GAMEPAD, SDLPAD_INPUT_KEYBOARD } SDLPad_InputType;
 
@@ -25,7 +26,9 @@ typedef union SDLPad_InputSource {
 static SDLPad_InputSource input_sources[INPUT_SOURCES_MAX] = { 0 };
 static int connected_input_sources = 0;
 static int keyboard_index = -1;
-static SDLPad_ButtonState button_state[INPUT_SOURCES_MAX] = { 0 };
+static bool input_enabled = true;
+static bool wait_for_neutral[INPUT_SOURCES_MAX] = { false };
+static bool suppressed_scancodes[SDL_SCANCODE_COUNT] = { false };
 
 static int input_source_index_from_joystick_id(SDL_JoystickID id) {
     for (int i = 0; i < INPUT_SOURCES_MAX; i++) {
@@ -56,6 +59,7 @@ static void setup_keyboard() {
         if (input_source->type == SDLPAD_INPUT_NONE) {
             input_source->type = SDLPAD_INPUT_KEYBOARD;
             keyboard_index = i;
+            wait_for_neutral[i] = true;
             connected_input_sources += 1;
             break;
         }
@@ -73,6 +77,7 @@ static void remove_keyboard() {
         if (input_source->type == SDLPAD_INPUT_KEYBOARD) {
             input_source->type = SDLPAD_INPUT_NONE;
             keyboard_index = -1;
+            wait_for_neutral[i] = true;
             connected_input_sources -= 1;
             break;
         }
@@ -104,6 +109,7 @@ static void handle_gamepad_added_event(SDL_GamepadDeviceEvent* event) {
 
         input_source->type = SDLPAD_INPUT_GAMEPAD;
         input_source->gamepad.gamepad = gamepad;
+        wait_for_neutral[i] = true;
         break;
     }
 
@@ -123,11 +129,20 @@ static void handle_gamepad_removed_event(SDL_GamepadDeviceEvent* event) {
     SDLPad_InputSource* input_source = &input_sources[index];
     SDL_CloseGamepad(input_source->gamepad.gamepad);
     input_source->type = SDLPAD_INPUT_NONE;
-    memset(&button_state[index], 0, sizeof(SDLPad_ButtonState));
+    input_source->gamepad.gamepad = NULL;
+    wait_for_neutral[index] = true;
     connected_input_sources -= 1;
 
     // Setup keyboard in the newly freed slot
     setup_keyboard();
+}
+
+static void update_suppressed_scancodes(const bool* keys) {
+    for (int i = 0; i < SDL_SCANCODE_COUNT; i++) {
+        if (suppressed_scancodes[i] && !keys[i]) {
+            suppressed_scancodes[i] = false;
+        }
+    }
 }
 
 static bool any_pressed(const bool* keys, KeymapButton button) {
@@ -141,7 +156,7 @@ static bool any_pressed(const bool* keys, KeymapButton button) {
             break;
         }
 
-        result = result || keys[code];    
+        result = result || (keys[code] && !suppressed_scancodes[code]);
     }
 
     return result;
@@ -150,6 +165,8 @@ static bool any_pressed(const bool* keys, KeymapButton button) {
 static void get_keyboard_state(SDLPad_ButtonState* state) {
     SDL_zerop(state);
     const bool* keys = SDL_GetKeyboardState(NULL);
+    const bool alt_held = keys[SDL_SCANCODE_LALT] || keys[SDL_SCANCODE_RALT] || (SDL_GetModState() & SDL_KMOD_ALT);
+    update_suppressed_scancodes(keys);
 
     state->dpad_up = any_pressed(keys, KEYMAP_BUTTON_UP);
     state->dpad_left = any_pressed(keys, KEYMAP_BUTTON_LEFT);
@@ -166,7 +183,7 @@ static void get_keyboard_state(SDLPad_ButtonState* state) {
     state->left_stick = any_pressed(keys, KEYMAP_BUTTON_LEFT_STICK);
     state->right_stick = any_pressed(keys, KEYMAP_BUTTON_RIGHT_STICK);
     state->back = any_pressed(keys, KEYMAP_BUTTON_BACK);
-    state->start = any_pressed(keys, KEYMAP_BUTTON_START);
+    state->start = !alt_held && any_pressed(keys, KEYMAP_BUTTON_START);
 
 #if DEBUG
     state->right_stick |= keys[SDL_SCANCODE_TAB];
@@ -197,6 +214,28 @@ static void get_gamepad_state(int id, SDLPad_ButtonState* state) {
     state->left_stick_y = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTY);
     state->right_stick_x = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTX);
     state->right_stick_y = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTY);
+
+    if (state->left_trigger <= INPUT_AXIS_DEADZONE) {
+        state->left_trigger = 0;
+    }
+
+    if (state->right_trigger <= INPUT_AXIS_DEADZONE) {
+        state->right_trigger = 0;
+    }
+}
+
+static bool stick_is_neutral(Sint16 x, Sint16 y) {
+    const Sint64 magnitude_squared = ((Sint64)x * x) + ((Sint64)y * y);
+    const Sint64 deadzone_squared = (Sint64)INPUT_AXIS_DEADZONE * INPUT_AXIS_DEADZONE;
+    return magnitude_squared <= deadzone_squared;
+}
+
+static bool button_state_is_neutral(const SDLPad_ButtonState* state) {
+    return !state->south && !state->east && !state->west && !state->north && !state->back && !state->start &&
+           !state->left_stick && !state->right_stick && !state->left_shoulder && !state->right_shoulder &&
+           state->left_trigger == 0 && state->right_trigger == 0 && !state->dpad_up && !state->dpad_down &&
+           !state->dpad_left && !state->dpad_right && stick_is_neutral(state->left_stick_x, state->left_stick_y) &&
+           stick_is_neutral(state->right_stick_x, state->right_stick_y);
 }
 
 void SDLPad_Init() {
@@ -213,9 +252,27 @@ void SDLPad_Quit() {
     }
 
     SDL_zeroa(input_sources);
-    SDL_zeroa(button_state);
+    SDL_zeroa(wait_for_neutral);
+    SDL_zeroa(suppressed_scancodes);
     connected_input_sources = 0;
     keyboard_index = -1;
+    input_enabled = true;
+}
+
+void SDLPad_SetInputEnabled(bool enabled) {
+    input_enabled = enabled;
+
+    if (!enabled) {
+        for (int i = 0; i < SDL_arraysize(wait_for_neutral); i++) {
+            wait_for_neutral[i] = true;
+        }
+    }
+}
+
+void SDLPad_SuppressKeyboardScancodeUntilReleased(SDL_Scancode scancode) {
+    if (scancode > SDL_SCANCODE_UNKNOWN && scancode < SDL_SCANCODE_COUNT) {
+        suppressed_scancodes[scancode] = true;
+    }
 }
 
 void SDLPad_HandleGamepadDeviceEvent(SDL_GamepadDeviceEvent* event) {
@@ -239,10 +296,24 @@ bool SDLPad_IsGamepadConnected(int id) {
 }
 
 void SDLPad_GetButtonState(int id, SDLPad_ButtonState* state) {
+    SDL_zerop(state);
+
+    if (id < 0 || id >= SDL_arraysize(input_sources) || input_sources[id].type == SDLPAD_INPUT_NONE) {
+        return;
+    }
+
     if (id == keyboard_index) {
         get_keyboard_state(state);
     } else {
         get_gamepad_state(id, state);
+    }
+
+    if (!input_enabled || wait_for_neutral[id]) {
+        if (input_enabled && button_state_is_neutral(state)) {
+            wait_for_neutral[id] = false;
+        }
+
+        SDL_zerop(state);
     }
 }
 

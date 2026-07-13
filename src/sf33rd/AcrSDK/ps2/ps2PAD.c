@@ -12,6 +12,7 @@
 #include <math.h>
 
 #define PI 3.14159275f
+#define ANALOG_TO_DIGITAL_DEADZONE 0x20
 
 // depth contains button depths in the following order:
 // - Right
@@ -310,7 +311,7 @@ void update_pad_stick_dir(PAD_STICK* st, s16 depth) {
 u8 lever_analog_to_digital(PAD_STICK* st) {
     static u8 ps2lever_analog_to_digital[16] = { 8, 9, 9, 1, 1, 5, 5, 4, 4, 6, 6, 2, 2, 10, 10, 8 };
 
-    if (st->pow < 0x40) {
+    if (st->pow < ANALOG_TO_DIGITAL_DEADZONE) {
         return 0;
     }
 

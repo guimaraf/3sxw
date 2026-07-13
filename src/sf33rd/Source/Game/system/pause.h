@@ -5,6 +5,7 @@
 #include "types.h"
 
 void dispControllerWasRemovedMessage(s32 x, s32 y, s32 step);
+bool Pause_RequestFromPlatformEvent();
 
 extern void Pause_Task(struct _TASK*);
 

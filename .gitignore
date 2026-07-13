@@ -26,6 +26,8 @@ states
 \!temp/
 \!original/
 resources
+prints/*
+!prints/.gitkeep
 .old/
 githuberror.txt
 

@@ -31,6 +31,8 @@ void SDLApp_Quit();
 /// @brief Poll SDL events.
 /// @return `true` if the main loop should continue running, `false` otherwise.
 bool SDLApp_PollEvents();
+bool SDLApp_ConsumePauseRequest();
+bool SDLApp_HasInputFocus();
 
 void SDLApp_BeginFrame();
 void SDLApp_EndFrame(SDLAppFrameTiming* timing);

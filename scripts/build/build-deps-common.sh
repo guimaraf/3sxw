@@ -34,10 +34,16 @@ cmake --version
 FFMPEG="ffmpeg-8.0"
 FFMPEG_DIR="$THIRD_PARTY/ffmpeg"
 FFMPEG_BUILD="$FFMPEG_DIR/build"
+FFMPEG_FEATURE_STAMP="$FFMPEG_BUILD/.3sx-adx-mjpeg"
 
-if [ -d "$FFMPEG_BUILD" ]; then
+if [ -f "$FFMPEG_FEATURE_STAMP" ]; then
     echo "FFmpeg already built at $FFMPEG_BUILD"
 else
+    if [ -d "$FFMPEG_BUILD" ]; then
+        echo "Rebuilding FFmpeg to enable JPEG screenshots..."
+        rm -rf "$FFMPEG_BUILD"
+    fi
+
     echo "Building FFmpeg..."
     mkdir -p "$FFMPEG_DIR"
     cd "$FFMPEG_DIR"
@@ -59,7 +65,7 @@ else
                 --disable-all --disable-autodetect \
                 --disable-static --enable-shared \
                 --enable-avcodec --enable-avformat --enable-avutil --enable-swresample \
-                --enable-decoder=adpcm_adx --enable-parser=adx --enable-muxer=adx \
+                --enable-decoder=adpcm_adx --enable-encoder=mjpeg --enable-parser=adx --enable-muxer=adx \
                 --enable-pic \
                 --extra-cflags="-fPIC" \
                 --extra-ldflags="-Wl,-rpath,@loader_path/../Frameworks" \
@@ -71,7 +77,7 @@ else
                 --disable-all --disable-autodetect \
                 --disable-static --enable-shared \
                 --enable-avcodec --enable-avformat --enable-avutil --enable-swresample \
-                --enable-decoder=adpcm_adx --enable-parser=adx --enable-muxer=adx \
+                --enable-decoder=adpcm_adx --enable-encoder=mjpeg --enable-parser=adx --enable-muxer=adx \
                 --enable-pic \
                 --extra-cflags="-fPIC" \
                 --extra-ldflags="-Wl,-rpath,\$ORIGIN/../lib" \
@@ -83,7 +89,7 @@ else
                 --disable-all --disable-autodetect \
                 --disable-static --enable-shared \
                 --enable-avcodec --enable-avformat --enable-avutil --enable-swresample \
-                --enable-decoder=adpcm_adx --enable-parser=adx --enable-muxer=adx \
+                --enable-decoder=adpcm_adx --enable-encoder=mjpeg --enable-parser=adx --enable-muxer=adx \
                 --extra-cflags="-I/mingw64/include" \
                 --extra-ldflags="-L/mingw64/lib"
             ;;
@@ -95,6 +101,7 @@ else
 
     make -j"$PARALLEL_JOBS"
     make install
+    touch "$FFMPEG_FEATURE_STAMP"
     echo "FFmpeg installed to $FFMPEG_BUILD"
 
     cd ../..

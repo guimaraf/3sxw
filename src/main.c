@@ -29,6 +29,7 @@
 #include "sf33rd/Source/Game/sound/sound3rd.h"
 #include "sf33rd/Source/Game/stage/bg.h"
 #include "sf33rd/Source/Game/system/ramcnt.h"
+#include "sf33rd/Source/Game/system/pause.h"
 #include "sf33rd/Source/Game/system/sys_sub.h"
 #include "sf33rd/Source/Game/system/sys_sub2.h"
 #include "sf33rd/Source/Game/system/work_sys.h"
@@ -273,6 +274,33 @@ static void appCopyKeyData() {
     PLsw[1][1] = PLsw[1][0];
     PLsw[0][0] = p1sw_buff;
     PLsw[1][0] = p2sw_buff;
+}
+
+static void appClearKeyData() {
+    p1sw_buff = 0;
+    p2sw_buff = 0;
+    p3sw_buff = 0;
+    p4sw_buff = 0;
+    p1sw_0 = 0;
+    p1sw_1 = 0;
+    p2sw_0 = 0;
+    p2sw_1 = 0;
+    p3sw_0 = 0;
+    p3sw_1 = 0;
+    p4sw_0 = 0;
+    p4sw_1 = 0;
+    SDL_zeroa(PLsw);
+}
+
+static void handle_platform_pause_request() {
+    const bool explicit_pause_request = SDLApp_ConsumePauseRequest();
+
+    if (!explicit_pause_request && SDLApp_HasInputFocus()) {
+        return;
+    }
+
+    appClearKeyData();
+    Pause_RequestFromPlatformEvent();
 }
 
 void njUserMain() {
@@ -630,6 +658,8 @@ static int loop() {
                     break;
                 }
 
+                handle_platform_pause_request();
+
                 SDLApp_BeginFrame();
                 game_step_0(NULL, NULL);
                 SDLApp_EndFrame(NULL);
@@ -646,6 +676,8 @@ static int loop() {
             if (!is_running) {
                 break;
             }
+
+            handle_platform_pause_request();
 
             const Uint64 begin_start_ns = poll_end_ns;
             SDLApp_BeginFrame();
