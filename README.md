@@ -121,7 +121,7 @@ On Windows, `build.bat` configures, compiles, and installs the portable applicat
 
 The sound shutdown interface is now declared consistently between the game and port layers, fixing the previous Clang `SPU_Quit` undeclared-function build failure when warnings are treated as errors.
 
-Windows is the primary and extensively tested target. Linux and macOS build and installation flows are prepared, but runtime validation on real Linux and Mac hardware is still pending. See the [quick compilation guide](compileHelp.md) or the detailed [Windows](docs/buildWindows.md), [Linux](docs/buildLinux.md), and [macOS](docs/buildMac.md) guides.
+Windows is the primary and extensively tested target. Linux and macOS build and installation flows are prepared, but runtime validation on real Linux and Mac hardware is still pending. See the platform-specific [Windows](docs/buildWindows.md), [Linux](docs/buildLinux.md), and [macOS](docs/buildMac.md) guides.
 
 ### Gill available from the start
 
@@ -289,7 +289,7 @@ No Windows, o `build.bat` configura, compila e instala a aplicacao portatil em R
 
 A interface de encerramento do sistema de som agora esta declarada de forma consistente entre as camadas do jogo e do port, corrigindo o erro anterior do Clang que informava a funcao `SPU_Quit` como nao declarada quando os avisos eram tratados como erros.
 
-O Windows e a plataforma principal e foi amplamente testado. Os fluxos de compilacao e instalacao para Linux e macOS estao preparados, mas a validacao de execucao em hardware real com Linux e Mac ainda esta pendente. Consulte o [guia rapido de compilacao](compileHelp.md) ou os guias detalhados para [Windows](docs/buildWindows.md), [Linux](docs/buildLinux.md) e [macOS](docs/buildMac.md).
+O Windows e a plataforma principal e foi amplamente testado. Os fluxos de compilacao e instalacao para Linux e macOS estao preparados, mas a validacao de execucao em hardware real com Linux e Mac ainda esta pendente. Consulte os guias especificos para [Windows](docs/buildWindows.md), [Linux](docs/buildLinux.md) e [macOS](docs/buildMac.md).
 
 ### Gill disponivel desde o inicio
 

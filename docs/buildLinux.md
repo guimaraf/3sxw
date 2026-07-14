@@ -2,6 +2,13 @@
 
 This guide explains how to build **3SX (Street Fighter III: 3rd Strike)** on Linux distributions based on Debian or Ubuntu.
 
+Clone the repository with its submodules, or initialize them in an existing checkout:
+
+```bash
+git clone --recurse-submodules <REPOSITORY_URL>
+git submodule update --init --recursive
+```
+
 ## 1. Install required packages
 
 Before building, install the base toolchain and libraries:
@@ -36,8 +43,11 @@ These scripts prepare FFmpeg, SDL3, libcdio, minizip-ng, and tf-psa-crypto in `t
 Configure the project:
 
 ```bash
-CC=clang CXX=clang++ cmake -B build -DCMAKE_BUILD_TYPE=Release
+CC=clang CXX=clang++ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 ```
+
+> [!NOTE]
+> Run the configure command again after changing `CMakeLists.txt` or an install rule.
 
 Build the project:
 
@@ -66,17 +76,27 @@ cmake --install build --prefix build/application
 > You must use your own legally obtained original copy of the game.
 > This repository is not affiliated with or endorsed by Capcom and does not include proprietary game assets.
 
-After installation:
-
-1. Go to `build/application/`
-2. Create a folder named `resources`
-3. Place `SF33RD.AFS` inside it
-
-Final path:
+The installed application contains:
 
 ```text
-build/application/resources/SF33RD.AFS
+build/application/bin/SF3
+build/application/bin/sf3config
+build/application/bin/data/img/bezel.png
+build/application/lib/
 ```
+
+The configurator's intermediate binary is generated under `appConfig/build/`. The install step copies it to `build/application/bin/`, and the shared runtime libraries are installed under `build/application/lib/`.
+
+Create `build/application/bin/resources/` and place your legally obtained resource at:
+
+```text
+build/application/bin/resources/SF33RD.AFS
+```
+
+The final `bin/` directory must remain writable because saves, replays, configuration, screenshots, and critical logs are stored with the portable game.
+
+> [!WARNING]
+> If a failed CMake configuration leaves `build/` inconsistent, remove `build/CMakeCache.txt` and `build/CMakeFiles/`, or recreate the entire `build/` directory, before configuring again.
 
 ## Native hardware validation status
 
@@ -89,6 +109,13 @@ Pending checks include startup, ISO selection and cancellation, `SF33RD.AFS` ext
 # Guia de Compilacao: Linux
 
 Este guia explica como compilar o **3SX (Street Fighter III: 3rd Strike)** em distribuicoes Linux baseadas em Debian ou Ubuntu.
+
+Clone o repositorio com seus submodulos ou inicialize-os em um checkout existente:
+
+```bash
+git clone --recurse-submodules <URL_DO_REPOSITORIO>
+git submodule update --init --recursive
+```
 
 ## 1. Instale os pacotes necessarios
 
@@ -124,8 +151,11 @@ Esses scripts preparam FFmpeg, SDL3, libcdio, minizip-ng e tf-psa-crypto em `thi
 Configure o projeto:
 
 ```bash
-CC=clang CXX=clang++ cmake -B build -DCMAKE_BUILD_TYPE=Release
+CC=clang CXX=clang++ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 ```
+
+> [!NOTE]
+> Execute novamente o comando de configuracao depois de alterar `CMakeLists.txt` ou alguma regra de instalacao.
 
 Compile o projeto:
 
@@ -154,17 +184,27 @@ cmake --install build --prefix build/application
 > Voce deve usar sua propria copia original obtida legalmente.
 > Este repositorio nao possui afiliacao nem endosso da Capcom e nao inclui assets proprietarios do jogo.
 
-Depois da instalacao:
-
-1. Va para `build/application/`
-2. Crie uma pasta chamada `resources`
-3. Coloque `SF33RD.AFS` dentro dela
-
-Caminho final:
+A aplicacao instalada contem:
 
 ```text
-build/application/resources/SF33RD.AFS
+build/application/bin/SF3
+build/application/bin/sf3config
+build/application/bin/data/img/bezel.png
+build/application/lib/
 ```
+
+O binario intermediario do configurador e gerado em `appConfig/build/`. O passo de instalacao o copia para `build/application/bin/`, enquanto as bibliotecas compartilhadas de runtime sao instaladas em `build/application/lib/`.
+
+Crie `build/application/bin/resources/` e coloque o recurso obtido legalmente em:
+
+```text
+build/application/bin/resources/SF33RD.AFS
+```
+
+A pasta final `bin/` precisa permitir escrita porque saves, replays, configuracoes, capturas de tela e logs criticos permanecem junto do jogo portatil.
+
+> [!WARNING]
+> Se uma configuracao incompleta do CMake deixar `build/` inconsistente, remova `build/CMakeCache.txt` e `build/CMakeFiles/` ou recrie toda a pasta `build/` antes de configurar novamente.
 
 ## Situacao da validacao em hardware real
 

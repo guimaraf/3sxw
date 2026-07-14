@@ -2,6 +2,13 @@
 
 This guide explains how to build **3SX (Street Fighter III: 3rd Strike)** on macOS.
 
+Clone the repository with its submodules, or initialize them in an existing checkout:
+
+```bash
+git clone --recurse-submodules <REPOSITORY_URL>
+git submodule update --init --recursive
+```
+
 ## 1. Verify Xcode Command Line Tools
 
 Check whether the command line tools are installed:
@@ -14,6 +21,18 @@ If the command does not return a valid path, install them:
 
 ```bash
 xcode-select --install
+```
+
+The dependency scripts also require CMake. Confirm that it is available:
+
+```bash
+cmake --version
+```
+
+If necessary, install CMake and the supporting build tools using your preferred package manager. For example, with Homebrew:
+
+```bash
+brew install cmake nasm pkg-config
 ```
 
 ## 2. Prepare `third_party`
@@ -41,8 +60,11 @@ These scripts prepare FFmpeg, SDL3, libcdio, minizip-ng, and tf-psa-crypto in `t
 Configure the project:
 
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 ```
+
+> [!NOTE]
+> Run the configure command again after changing `CMakeLists.txt` or an install rule.
 
 Build the project:
 
@@ -71,17 +93,26 @@ cmake --install build --prefix build/application
 > You must use your own legally obtained original copy of the game.
 > This repository is not affiliated with or endorsed by Capcom and does not include proprietary game assets.
 
-After installation:
-
-1. Go to `build/application/`
-2. Create a folder named `resources`
-3. Place `SF33RD.AFS` inside it
-
-Final path:
+The installed application contains:
 
 ```text
-build/application/resources/SF33RD.AFS
+build/application/3SX.app
+build/application/sf3config.app
+build/application/3SX.app/Contents/MacOS/data/img/bezel.png
 ```
+
+The configurator's intermediate bundle is generated under `appConfig/build/`. The install step copies both application bundles and their dynamic libraries to the final layout.
+
+Create the resources directory inside the game bundle and place your legally obtained resource at:
+
+```text
+build/application/3SX.app/Contents/MacOS/resources/SF33RD.AFS
+```
+
+The game bundle must remain writable because saves, replays, configuration, screenshots, and critical logs are stored under `3SX.app/Contents/MacOS/` for portable operation.
+
+> [!WARNING]
+> If a failed CMake configuration leaves `build/` inconsistent, remove `build/CMakeCache.txt` and `build/CMakeFiles/`, or recreate the entire `build/` directory, before configuring again.
 
 ## Native hardware validation status
 
@@ -95,6 +126,13 @@ Pending checks include startup, ISO selection and cancellation, `SF33RD.AFS` ext
 
 Este guia explica como compilar o **3SX (Street Fighter III: 3rd Strike)** no macOS.
 
+Clone o repositorio com seus submodulos ou inicialize-os em um checkout existente:
+
+```bash
+git clone --recurse-submodules <URL_DO_REPOSITORIO>
+git submodule update --init --recursive
+```
+
 ## 1. Verifique as Xcode Command Line Tools
 
 Confira se as ferramentas de linha de comando estao instaladas:
@@ -107,6 +145,18 @@ Se o comando nao retornar um caminho valido, instale as ferramentas:
 
 ```bash
 xcode-select --install
+```
+
+Os scripts de dependencias tambem precisam do CMake. Confirme que ele esta disponivel:
+
+```bash
+cmake --version
+```
+
+Se necessario, instale o CMake e as ferramentas auxiliares com o gerenciador de pacotes de sua preferencia. Por exemplo, usando Homebrew:
+
+```bash
+brew install cmake nasm pkg-config
 ```
 
 ## 2. Prepare `third_party`
@@ -134,8 +184,11 @@ Esses scripts preparam FFmpeg, SDL3, libcdio, minizip-ng e tf-psa-crypto em `thi
 Configure o projeto:
 
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 ```
+
+> [!NOTE]
+> Execute novamente o comando de configuracao depois de alterar `CMakeLists.txt` ou alguma regra de instalacao.
 
 Compile o projeto:
 
@@ -164,17 +217,26 @@ cmake --install build --prefix build/application
 > Voce deve usar sua propria copia original obtida legalmente.
 > Este repositorio nao possui afiliacao nem endosso da Capcom e nao inclui assets proprietarios do jogo.
 
-Depois da instalacao:
-
-1. Va para `build/application/`
-2. Crie uma pasta chamada `resources`
-3. Coloque `SF33RD.AFS` dentro dela
-
-Caminho final:
+A aplicacao instalada contem:
 
 ```text
-build/application/resources/SF33RD.AFS
+build/application/3SX.app
+build/application/sf3config.app
+build/application/3SX.app/Contents/MacOS/data/img/bezel.png
 ```
+
+O bundle intermediario do configurador e gerado em `appConfig/build/`. O passo de instalacao copia os dois bundles e suas bibliotecas dinamicas para a estrutura final.
+
+Crie a pasta de recursos dentro do bundle do jogo e coloque o recurso obtido legalmente em:
+
+```text
+build/application/3SX.app/Contents/MacOS/resources/SF33RD.AFS
+```
+
+O bundle do jogo precisa permitir escrita porque saves, replays, configuracoes, capturas de tela e logs criticos permanecem em `3SX.app/Contents/MacOS/` para manter a operacao portatil.
+
+> [!WARNING]
+> Se uma configuracao incompleta do CMake deixar `build/` inconsistente, remova `build/CMakeCache.txt` e `build/CMakeFiles/` ou recrie toda a pasta `build/` antes de configurar novamente.
 
 ## Situacao da validacao em hardware real
 
