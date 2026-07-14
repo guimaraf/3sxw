@@ -8,6 +8,7 @@
 #include "port/sdl/sdl_game_renderer.h"
 #include "port/sdl/sdl_message_renderer.h"
 #include "port/sdl/sdl_pad.h"
+#include "port/sdl/sdl_scanlines.h"
 #include "port/sdl/sdl_screenshot.h"
 #include "port/sound/adx.h"
 #include "port/utils.h"
@@ -35,7 +36,7 @@ static const Uint64 target_frame_time_ns = 1000000000.0 / TARGET_FPS;
 SDL_Window* window = NULL;
 static SDL_Renderer* renderer = NULL;
 static SDL_Texture* screen_texture = NULL;
-static ScaleMode scale_mode = SCALEMODE_SOFT_LINEAR;
+static ScaleMode scale_mode = SCALEMODE_NEAREST;
 
 static Uint64 frame_deadline = 0;
 static Uint64 frame_end_times[FRAME_END_TIMES_MAX];
@@ -52,6 +53,8 @@ static bool pads_initialized = false;
 static bool screenshots_initialized = false;
 static bool bezel_initialized = false;
 static bool bezel_render_error_logged = false;
+static bool scanlines_initialized = false;
+static bool scanlines_render_error_logged = false;
 static Uint64 last_mouse_motion_time = 0;
 static const int mouse_hide_delay_ms = 2000; // 2 seconds
 
@@ -246,6 +249,10 @@ bool SDLApp_FullInit() {
         bezel_initialized = SDLBezel_Init(renderer);
     }
 
+    if (Config_GetBool(CFG_KEY_SCANLINES)) {
+        scanlines_initialized = SDLScanlines_Init(renderer, Config_GetInt(CFG_KEY_SCANLINE_OPACITY));
+    }
+
     screenshots_initialized = SDLScreenshot_Init();
 
     if (!screenshots_initialized) {
@@ -292,6 +299,11 @@ void SDLApp_Quit() {
     if (pads_initialized) {
         SDLPad_Quit();
         pads_initialized = false;
+    }
+
+    if (scanlines_initialized) {
+        SDLScanlines_Quit();
+        scanlines_initialized = false;
     }
 
     if (bezel_initialized) {
@@ -611,15 +623,20 @@ void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
 
     // Render content
     const SDL_FRect dst_rect = get_letterbox_rect(screen_texture->w, screen_texture->h);
+    SDL_RenderTexture(renderer, cps3_canvas, NULL, &dst_rect);
+
+    if (scanlines_initialized && !SDLScanlines_Render(renderer, &dst_rect) && !scanlines_render_error_logged) {
+        log_error("Couldn't render the scanline texture: %s", SDL_GetError());
+        scanlines_render_error_logged = true;
+    }
+
+    SDL_RenderTexture(renderer, message_canvas, NULL, &dst_rect);
 
     if (should_render_bezel() && !SDLBezel_Render(renderer, screen_texture->w, screen_texture->h) &&
         !bezel_render_error_logged) {
         log_error("Couldn't render the bezel texture: %s", SDL_GetError());
         bezel_render_error_logged = true;
     }
-
-    SDL_RenderTexture(renderer, cps3_canvas, NULL, &dst_rect);
-    SDL_RenderTexture(renderer, message_canvas, NULL, &dst_rect);
 
     // Render screen texture to screen
     SDL_SetRenderTarget(renderer, NULL);

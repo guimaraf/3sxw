@@ -59,6 +59,12 @@ The bezel is loaded once at startup and is shown only while the game is fullscre
 
 For predictable transparency, prefer an 8-bit RGBA PNG with a 16:9 resolution and a fully transparent center; `1920x1080` with a centered `1440x1080` transparent opening is recommended. The image can be replaced without recompiling the project, but the game must be restarted to reload it. A missing or invalid file is reported in `data/error.log`, and the game continues normally with black side bars. `F12` screenshots include the bezel whenever it is active. Only distribute artwork that you have permission to use.
 
+### Optional scanlines
+
+Set `scanlines = true` in `<game folder>/data/config` to apply scanlines only to the 4:3 game image in both windowed and fullscreen modes. The setting defaults to `false`. Use `scanline-opacity` to control the effect intensity from `0` to `100`; its default value is `20`, and values outside this range are clamped and reported in `data/error.log`.
+
+The scanline pattern is generated once at startup, follows the original 224-line game image, and is rendered in one additional blended texture operation per frame. It does not add another frame buffer, alter input processing, or perform per-frame allocations. System messages remain above the effect, the 16:9 bezel is rendered above it, and `F12` screenshots include scanlines whenever they are enabled.
+
 ### JPEG screenshots
 
 Press `F12` to capture the current game screen. Screenshots are stored as high-quality JPEG files under `prints/`, using names in the following format:
@@ -186,6 +192,12 @@ Defina `bezel = true` em `<pasta do jogo>/data/config` e coloque a imagem em `<p
 A moldura e carregada uma vez na inicializacao e aparece somente quando o jogo esta em tela cheia e a saida real do renderer esta em 16:9. Ela desaparece automaticamente no modo janela, depois de `Alt+Enter`, quando a janela e esticada manualmente e em monitores que nao estejam em 16:9. A imagem do jogo e desenhada sobre a moldura, impedindo que um arquivo incorreto cubra o gameplay.
 
 Para garantir uma transparencia previsivel, prefira um PNG RGBA de 8 bits com resolucao 16:9 e centro totalmente transparente; recomenda-se `1920x1080` com uma abertura transparente central de `1440x1080`. A imagem pode ser substituida sem recompilar o projeto, mas o jogo precisa ser reiniciado para recarrega-la. Arquivos ausentes ou invalidos sao informados em `data/error.log`, e o jogo continua normalmente com faixas laterais pretas. As capturas feitas com `F12` incluem a moldura quando ela estiver ativa. Distribua apenas artes que voce tenha permissao para usar.
+
+### Scanlines opcionais
+
+Defina `scanlines = true` em `<pasta do jogo>/data/config` para aplicar scanlines somente sobre a imagem 4:3 do jogo, tanto no modo janela quanto em tela cheia. A opcao usa `false` como valor padrao. Use `scanline-opacity` para controlar a intensidade do efeito entre `0` e `100`; o valor padrao e `20`, e valores fora desse intervalo sao limitados e informados em `data/error.log`.
+
+O padrao de scanlines e gerado uma unica vez na inicializacao, acompanha as 224 linhas da imagem original do jogo e usa apenas uma operacao adicional de textura com transparencia por frame. O recurso nao adiciona outro framebuffer, nao altera o processamento de input e nao realiza alocacoes a cada frame. Mensagens do sistema permanecem acima do efeito, a moldura 16:9 e renderizada acima dele e as capturas feitas com `F12` incluem as scanlines quando estiverem habilitadas.
 
 ### Capturas de tela em JPEG
 

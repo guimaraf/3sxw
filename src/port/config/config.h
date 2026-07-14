@@ -8,6 +8,8 @@
 #define CFG_KEY_WINDOW_HEIGHT "window-height"
 #define CFG_KEY_SCALEMODE "scale-mode"
 #define CFG_KEY_BEZEL "bezel"
+#define CFG_KEY_SCANLINES "scanlines"
+#define CFG_KEY_SCANLINE_OPACITY "scanline-opacity"
 #define CFG_DRAW_PLAYERS_ABOVE_HUD "draw-players-above-hud"
 
 /// Initialize config system
