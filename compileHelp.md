@@ -52,6 +52,15 @@ Saida final:
 
 ```text
 build/application/bin/SF3.exe
+build/application/bin/sf3config.exe
+```
+
+O executavel intermediario do configurador e gerado em `appConfig/build/sf3config.exe` e copiado automaticamente para a aplicacao pelo passo de instalacao.
+
+A moldura incluida no projeto e instalada automaticamente em:
+
+```text
+build/application/bin/data/img/bezel.png
 ```
 
 Coloque o recurso legalmente obtido em:
@@ -77,6 +86,15 @@ Saida final:
 
 ```text
 build/application/bin/SF3
+build/application/bin/sf3config
+```
+
+O binario intermediario do configurador e gerado em `appConfig/build/`.
+
+A moldura incluida no projeto e instalada automaticamente em:
+
+```text
+build/application/bin/data/img/bezel.png
 ```
 
 As bibliotecas ficam em `build/application/lib/`. Coloque o recurso em:
@@ -106,6 +124,15 @@ Saida final:
 
 ```text
 build/application/3SX.app
+build/application/sf3config.app
+```
+
+O bundle intermediario do configurador e gerado em `appConfig/build/`.
+
+A moldura incluida no projeto e instalada automaticamente em:
+
+```text
+build/application/3SX.app/Contents/MacOS/data/img/bezel.png
 ```
 
 No macOS, a pasta portatil fica ao lado do bundle:

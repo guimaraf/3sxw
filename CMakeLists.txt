@@ -177,6 +177,9 @@ elseif(UNIX)
     )
 endif()
 
+# Build the standalone configuration application in its requested directory.
+add_subdirectory(appConfig "${CMAKE_SOURCE_DIR}/appConfig/build")
+
 # ======================================
 # Installation
 # ======================================
@@ -267,6 +270,22 @@ elseif(UNIX)
         DESTINATION share/SF3/licenses
     )
 endif()
+
+set(BEZEL_IMAGE_FILE "${CMAKE_SOURCE_DIR}/img/bezel.png")
+
+if(NOT EXISTS "${BEZEL_IMAGE_FILE}")
+    message(FATAL_ERROR "Required bezel image was not found: ${BEZEL_IMAGE_FILE}")
+endif()
+
+if(APPLE)
+    set(GAME_DATA_INSTALL_DIR "3SX.app/Contents/MacOS/data")
+else()
+    set(GAME_DATA_INSTALL_DIR "bin/data")
+endif()
+
+install(FILES "${BEZEL_IMAGE_FILE}"
+    DESTINATION "${GAME_DATA_INSTALL_DIR}/img"
+)
 
 # ======================================
 # Packaging

@@ -18,6 +18,7 @@ __pycache__
 # Project
 
 /build/
+/appConfig/build/
 temp
 third_party
 states
