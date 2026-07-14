@@ -3,6 +3,7 @@
 #include "port/config/config.h"
 #include "port/config/keymap.h"
 #include "port/debug/debug_log.h"
+#include "port/sdl/sdl_bezel.h"
 #include "port/sdl/sdl_debug_text.h"
 #include "port/sdl/sdl_game_renderer.h"
 #include "port/sdl/sdl_message_renderer.h"
@@ -49,6 +50,8 @@ static bool has_input_focus = true;
 static bool config_initialized = false;
 static bool pads_initialized = false;
 static bool screenshots_initialized = false;
+static bool bezel_initialized = false;
+static bool bezel_render_error_logged = false;
 static Uint64 last_mouse_motion_time = 0;
 static const int mouse_hide_delay_ms = 2000; // 2 seconds
 
@@ -239,6 +242,10 @@ bool SDLApp_FullInit() {
         return false;
     }
 
+    if (Config_GetBool(CFG_KEY_BEZEL)) {
+        bezel_initialized = SDLBezel_Init(renderer);
+    }
+
     screenshots_initialized = SDLScreenshot_Init();
 
     if (!screenshots_initialized) {
@@ -285,6 +292,11 @@ void SDLApp_Quit() {
     if (pads_initialized) {
         SDLPad_Quit();
         pads_initialized = false;
+    }
+
+    if (bezel_initialized) {
+        SDLBezel_Quit();
+        bezel_initialized = false;
     }
 
     if (config_initialized) {
@@ -475,6 +487,40 @@ static SDL_FRect get_letterbox_rect(int win_w, int win_h) {
     }
 }
 
+static bool output_is_16_by_9(int width, int height) {
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+
+    Sint64 difference = ((Sint64)width * 9) - ((Sint64)height * 16);
+
+    if (difference < 0) {
+        difference = -difference;
+    }
+
+    // Accept common near-16:9 modes such as 1366x768 without accepting 16:10.
+    return difference <= ((Sint64)height / 10);
+}
+
+static bool should_render_bezel() {
+    if (!bezel_initialized || window == NULL || renderer == NULL) {
+        return false;
+    }
+
+    if (!(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN)) {
+        return false;
+    }
+
+    int output_width = 0;
+    int output_height = 0;
+
+    if (!SDL_GetRenderOutputSize(renderer, &output_width, &output_height)) {
+        return false;
+    }
+
+    return output_is_16_by_9(output_width, output_height);
+}
+
 static void note_frame_end_time() {
     frame_end_times[frame_end_times_index] = SDL_GetTicksNS();
     frame_end_times_index += 1;
@@ -565,6 +611,13 @@ void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
 
     // Render content
     const SDL_FRect dst_rect = get_letterbox_rect(screen_texture->w, screen_texture->h);
+
+    if (should_render_bezel() && !SDLBezel_Render(renderer, screen_texture->w, screen_texture->h) &&
+        !bezel_render_error_logged) {
+        log_error("Couldn't render the bezel texture: %s", SDL_GetError());
+        bezel_render_error_logged = true;
+    }
+
     SDL_RenderTexture(renderer, cps3_canvas, NULL, &dst_rect);
     SDL_RenderTexture(renderer, message_canvas, NULL, &dst_rect);
 

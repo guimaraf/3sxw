@@ -37,6 +37,7 @@ In the original project, save files, configuration, and other data were stored i
 | Key mapping | `<game folder>/data/keymap` |
 | Critical error log | `<game folder>/data/error.log` |
 | Screenshots | `<game folder>/prints/` |
+| Optional bezel | `<game folder>/data/img/bezel.png` |
 | Game assets | `<game folder>/` (next to the `.exe`) |
 
 This makes the game 100% portable: just copy the folder to another location or computer and everything will work without reinstalling.
@@ -49,6 +50,14 @@ This makes the game 100% portable: just copy the folder to another location or c
 - Disconnecting a controller clears its previous state and preserves the existing in-game reconnect flow.
 - Analog sticks and triggers use a 25% deadzone to reduce drift without making directional inputs feel excessively long.
 - Only one game instance can run in the same operating-system session. A second launch displays an error and exits before accessing resources, saves, audio, or gameplay state.
+
+### Optional 16:9 bezel
+
+Set `bezel = true` in `<game folder>/data/config` and place the image at `<game folder>/data/img/bezel.png` to display a decorative bezel around the 4:3 game area. The setting defaults to `false`.
+
+The bezel is loaded once at startup and is shown only while the game is fullscreen and the actual renderer output is 16:9. It is automatically hidden in windowed mode, after `Alt+Enter`, when the window is manually stretched, and on non-16:9 displays. The game image is rendered over the bezel so an incorrect frame cannot cover gameplay.
+
+For predictable transparency, prefer an 8-bit RGBA PNG with a 16:9 resolution and a fully transparent center; `1920x1080` with a centered `1440x1080` transparent opening is recommended. The image can be replaced without recompiling the project, but the game must be restarted to reload it. A missing or invalid file is reported in `data/error.log`, and the game continues normally with black side bars. `F12` screenshots include the bezel whenever it is active. Only distribute artwork that you have permission to use.
 
 ### JPEG screenshots
 
@@ -156,6 +165,7 @@ No projeto original, arquivos de save, configuracoes e outros dados eram armazen
 | Mapeamento de teclas | `<pasta do jogo>/data/keymap` |
 | Log de erros criticos | `<pasta do jogo>/data/error.log` |
 | Capturas de tela | `<pasta do jogo>/prints/` |
+| Moldura opcional | `<pasta do jogo>/data/img/bezel.png` |
 | Assets do jogo | `<pasta do jogo>/` (ao lado do `.exe`) |
 
 Isso torna o jogo 100% portatil: basta copiar a pasta para outro local ou computador e tudo funcionara normalmente, sem necessidade de reinstalacao.
@@ -168,6 +178,14 @@ Isso torna o jogo 100% portatil: basta copiar a pasta para outro local ou comput
 - Desconectar um controle limpa seu estado anterior e preserva o fluxo de reconexao exibido pelo proprio jogo.
 - Analogicos e gatilhos usam deadzone de 25%, reduzindo drift sem deixar os comandos direcionais excessivamente longos.
 - Somente uma instancia do jogo pode ser executada na mesma sessao do sistema operacional. Uma segunda abertura exibe um erro e encerra antes de acessar recursos, saves, audio ou o estado do gameplay.
+
+### Moldura opcional em 16:9
+
+Defina `bezel = true` em `<pasta do jogo>/data/config` e coloque a imagem em `<pasta do jogo>/data/img/bezel.png` para exibir uma moldura decorativa ao redor da area 4:3 do jogo. A opcao usa `false` como valor padrao.
+
+A moldura e carregada uma vez na inicializacao e aparece somente quando o jogo esta em tela cheia e a saida real do renderer esta em 16:9. Ela desaparece automaticamente no modo janela, depois de `Alt+Enter`, quando a janela e esticada manualmente e em monitores que nao estejam em 16:9. A imagem do jogo e desenhada sobre a moldura, impedindo que um arquivo incorreto cubra o gameplay.
+
+Para garantir uma transparencia previsivel, prefira um PNG RGBA de 8 bits com resolucao 16:9 e centro totalmente transparente; recomenda-se `1920x1080` com uma abertura transparente central de `1440x1080`. A imagem pode ser substituida sem recompilar o projeto, mas o jogo precisa ser reiniciado para recarrega-la. Arquivos ausentes ou invalidos sao informados em `data/error.log`, e o jogo continua normalmente com faixas laterais pretas. As capturas feitas com `F12` incluem a moldura quando ela estiver ativa. Distribua apenas artes que voce tenha permissao para usar.
 
 ### Capturas de tela em JPEG
 
