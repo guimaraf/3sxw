@@ -1,5 +1,5 @@
 #include "config_file.h"
-#include "localization.h"
+#include "language.h"
 
 #include <SDL3/SDL.h>
 
@@ -113,7 +113,7 @@ char* ConfigFile_CreatePath(char* error, size_t error_size) {
     const char* base_path = SDL_GetBasePath();
 
     if (base_path == NULL) {
-        SDL_snprintf(error, error_size, Localize(TEXT_ERR_LOCATE_APP_FOLDER), SDL_GetError());
+        SDL_snprintf(error, error_size, Language_Get(TEXT_ERR_LOCATE_APP_FOLDER), SDL_GetError());
         return NULL;
     }
 
@@ -124,12 +124,12 @@ char* ConfigFile_CreatePath(char* error, size_t error_size) {
 #else
     if (SDL_asprintf(&data_path, "%sdata", base_path) < 0 || data_path == NULL) {
 #endif
-        SDL_snprintf(error, error_size, "%s", Localize(TEXT_ERR_CREATE_CONFIG_PATH));
+        SDL_snprintf(error, error_size, "%s", Language_Get(TEXT_ERR_CREATE_CONFIG_PATH));
         return NULL;
     }
 
     if (!SDL_CreateDirectory(data_path)) {
-        SDL_snprintf(error, error_size, Localize(TEXT_ERR_ACCESS_FOLDER), data_path, SDL_GetError());
+        SDL_snprintf(error, error_size, Language_Get(TEXT_ERR_ACCESS_FOLDER), data_path, SDL_GetError());
         SDL_free(data_path);
         return NULL;
     }
@@ -137,7 +137,7 @@ char* ConfigFile_CreatePath(char* error, size_t error_size) {
     char* config_path = NULL;
 
     if (SDL_asprintf(&config_path, "%s/config", data_path) < 0 || config_path == NULL) {
-        SDL_snprintf(error, error_size, "%s", Localize(TEXT_ERR_CREATE_CONFIG_FILE_PATH));
+        SDL_snprintf(error, error_size, "%s", Language_Get(TEXT_ERR_CREATE_CONFIG_FILE_PATH));
     }
 
     SDL_free(data_path);
@@ -239,7 +239,7 @@ static void apply_setting(ConfigSettings* settings, const char* key, const char*
 
 bool ConfigFile_Load(const char* path, ConfigSettings* settings, char* error, size_t error_size) {
     if (path == NULL || settings == NULL) {
-        SDL_snprintf(error, error_size, "%s", Localize(TEXT_ERR_INVALID_READ_PARAMS));
+        SDL_snprintf(error, error_size, "%s", Language_Get(TEXT_ERR_INVALID_READ_PARAMS));
         return false;
     }
 
@@ -251,7 +251,7 @@ bool ConfigFile_Load(const char* path, ConfigSettings* settings, char* error, si
             return true;
         }
 
-        SDL_snprintf(error, error_size, Localize(TEXT_ERR_OPEN_FILE), path, strerror(errno));
+        SDL_snprintf(error, error_size, Language_Get(TEXT_ERR_OPEN_FILE), path, strerror(errno));
         return false;
     }
 
@@ -270,7 +270,7 @@ bool ConfigFile_Load(const char* path, ConfigSettings* settings, char* error, si
     fclose(file);
 
     if (!read_ok) {
-        SDL_snprintf(error, error_size, Localize(TEXT_ERR_READ_FILE), path);
+        SDL_snprintf(error, error_size, Language_Get(TEXT_ERR_READ_FILE), path);
         return false;
     }
 
@@ -331,7 +331,7 @@ static bool close_written_file(FILE* file) {
 
 bool ConfigFile_Save(const char* path, const ConfigSettings* source, char* error, size_t error_size) {
     if (path == NULL || source == NULL) {
-        SDL_snprintf(error, error_size, "%s", Localize(TEXT_ERR_INVALID_WRITE_PARAMS));
+        SDL_snprintf(error, error_size, "%s", Language_Get(TEXT_ERR_INVALID_WRITE_PARAMS));
         return false;
     }
 
@@ -341,7 +341,7 @@ bool ConfigFile_Save(const char* path, const ConfigSettings* source, char* error
     FILE* input = fopen(path, "rb");
 
     if (input == NULL && errno != ENOENT) {
-        SDL_snprintf(error, error_size, Localize(TEXT_ERR_READ_FOR_SAVE), path, strerror(errno));
+        SDL_snprintf(error, error_size, Language_Get(TEXT_ERR_READ_FOR_SAVE), path, strerror(errno));
         return false;
     }
 
@@ -351,7 +351,7 @@ bool ConfigFile_Save(const char* path, const ConfigSettings* source, char* error
         if (input != NULL) {
             fclose(input);
         }
-        SDL_snprintf(error, error_size, "%s", Localize(TEXT_ERR_CREATE_TEMP_PATH));
+        SDL_snprintf(error, error_size, "%s", Language_Get(TEXT_ERR_CREATE_TEMP_PATH));
         return false;
     }
 
@@ -361,7 +361,7 @@ bool ConfigFile_Save(const char* path, const ConfigSettings* source, char* error
         if (input != NULL) {
             fclose(input);
         }
-        SDL_snprintf(error, error_size, Localize(TEXT_ERR_WRITE_FILE), temporary_path, strerror(errno));
+        SDL_snprintf(error, error_size, Language_Get(TEXT_ERR_WRITE_FILE), temporary_path, strerror(errno));
         SDL_free(temporary_path);
         return false;
     }
@@ -370,7 +370,7 @@ bool ConfigFile_Save(const char* path, const ConfigSettings* source, char* error
     bool write_ok = true;
 
     if (input == NULL) {
-        write_ok = fprintf(output, "%s\n\n", Localize(TEXT_CONFIG_HEADER)) >= 0;
+        write_ok = fprintf(output, "%s\n\n", Language_Get(TEXT_CONFIG_HEADER)) >= 0;
     } else {
         char line[CONFIG_LINE_LENGTH];
 
@@ -411,13 +411,13 @@ bool ConfigFile_Save(const char* path, const ConfigSettings* source, char* error
 
     if (!write_ok) {
         SDL_RemovePath(temporary_path);
-        SDL_snprintf(error, error_size, Localize(TEXT_ERR_FINISH_WRITE), path);
+        SDL_snprintf(error, error_size, Language_Get(TEXT_ERR_FINISH_WRITE), path);
         SDL_free(temporary_path);
         return false;
     }
 
     if (!SDL_RenamePath(temporary_path, path)) {
-        SDL_snprintf(error, error_size, Localize(TEXT_ERR_REPLACE_FILE), path, SDL_GetError());
+        SDL_snprintf(error, error_size, Language_Get(TEXT_ERR_REPLACE_FILE), path, SDL_GetError());
         SDL_RemovePath(temporary_path);
         SDL_free(temporary_path);
         return false;

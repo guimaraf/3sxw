@@ -9,7 +9,7 @@
 #endif
 
 #define FIRST_GLYPH 32
-#define LAST_GLYPH 126
+#define LAST_GLYPH 255
 #define GLYPH_COUNT ((LAST_GLYPH - FIRST_GLYPH) + 1)
 #define FALLBACK_FONT_SCALE 1.5f
 
@@ -25,7 +25,7 @@ static float font_line_height = SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE * FALLBACK_FO
 #if defined(_WIN32)
 
 #define FONT_ATLAS_WIDTH 1024
-#define FONT_ATLAS_HEIGHT 256
+#define FONT_ATLAS_HEIGHT 512
 #define FONT_PIXEL_HEIGHT 18
 #define GLYPH_PADDING 2
 
@@ -270,12 +270,61 @@ void AppFont_Quit(void) {
     font_line_height = SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE * FALLBACK_FONT_SCALE;
 }
 
-static int glyph_index(unsigned char character) {
-    if (character < FIRST_GLYPH || character > LAST_GLYPH) {
+static int glyph_index(Uint32 codepoint) {
+    if (codepoint < FIRST_GLYPH || codepoint > LAST_GLYPH) {
         return '?' - FIRST_GLYPH;
     }
 
-    return character - FIRST_GLYPH;
+    return (int)codepoint - FIRST_GLYPH;
+}
+
+static Uint32 next_utf8_codepoint(const char** text) {
+    const unsigned char* cursor = (const unsigned char*)*text;
+    const unsigned char first_byte = *cursor;
+
+    if (first_byte < 0x80) {
+        *text = (const char*)(cursor + 1);
+        return first_byte;
+    }
+
+    if ((first_byte & 0xe0) == 0xc0 && cursor[1] != '\0' && (cursor[1] & 0xc0) == 0x80) {
+        const Uint32 codepoint = ((Uint32)(first_byte & 0x1f) << 6) | (Uint32)(cursor[1] & 0x3f);
+
+        if (codepoint >= 0x80) {
+            *text = (const char*)(cursor + 2);
+            return codepoint;
+        }
+    }
+
+    if ((first_byte & 0xf0) == 0xe0 &&
+        cursor[1] != '\0' && cursor[2] != '\0' &&
+        (cursor[1] & 0xc0) == 0x80 && (cursor[2] & 0xc0) == 0x80) {
+        const Uint32 codepoint = ((Uint32)(first_byte & 0x0f) << 12) |
+                                 ((Uint32)(cursor[1] & 0x3f) << 6) |
+                                 (Uint32)(cursor[2] & 0x3f);
+
+        if (codepoint >= 0x800) {
+            *text = (const char*)(cursor + 3);
+            return codepoint;
+        }
+    }
+
+    if ((first_byte & 0xf8) == 0xf0 &&
+        cursor[1] != '\0' && cursor[2] != '\0' && cursor[3] != '\0' &&
+        (cursor[1] & 0xc0) == 0x80 && (cursor[2] & 0xc0) == 0x80 && (cursor[3] & 0xc0) == 0x80) {
+        const Uint32 codepoint = ((Uint32)(first_byte & 0x07) << 18) |
+                                 ((Uint32)(cursor[1] & 0x3f) << 12) |
+                                 ((Uint32)(cursor[2] & 0x3f) << 6) |
+                                 (Uint32)(cursor[3] & 0x3f);
+
+        if (codepoint >= 0x10000 && codepoint <= 0x10ffff) {
+            *text = (const char*)(cursor + 4);
+            return codepoint;
+        }
+    }
+
+    *text = (const char*)(cursor + 1);
+    return '?';
 }
 
 float AppFont_MeasureText(const char* text, float scale) {
@@ -289,8 +338,8 @@ float AppFont_MeasureText(const char* text, float scale) {
 
     float width = 0.0f;
 
-    for (const unsigned char* character = (const unsigned char*)text; *character != '\0'; character++) {
-        width += glyphs[glyph_index(*character)].advance * scale;
+    for (const char* cursor = text; *cursor != '\0'; ) {
+        width += glyphs[glyph_index(next_utf8_codepoint(&cursor))].advance * scale;
     }
 
     return width;
@@ -327,8 +376,8 @@ bool AppFont_Draw(SDL_Renderer* renderer,
 
     float destination_x = x;
 
-    for (const unsigned char* character = (const unsigned char*)text; *character != '\0'; character++) {
-        const FontGlyph* glyph = &glyphs[glyph_index(*character)];
+    for (const char* cursor = text; *cursor != '\0'; ) {
+        const FontGlyph* glyph = &glyphs[glyph_index(next_utf8_codepoint(&cursor))];
         const SDL_FRect destination = {
             .x = destination_x,
             .y = y,

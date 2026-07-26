@@ -32,6 +32,17 @@ jobs:
                 cmake --build build --parallel 2>&1 | tee build.log
             shell: bash
 
+          - name: Install portable macOS application
+            run: cmake --install build --prefix build/application
+            shell: bash
+
+          - name: Upload portable macOS application
+            uses: actions/upload-artifact@v4
+            with:
+                name: 3SXW-macOS
+                path: build/application
+                if-no-files-found: error
+
           - name: Upload build log
             if: always()
             uses: actions/upload-artifact@v4

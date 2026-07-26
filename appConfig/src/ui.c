@@ -1,22 +1,22 @@
 #include "ui.h"
 #include "font.h"
-#include "localization.h"
+#include "language.h"
 
 #include <SDL3/SDL.h>
 
 #define UI_WIDTH 780
-#define UI_HEIGHT 680
+#define UI_HEIGHT 730
 #define ROW_X 40
 #define ROW_WIDTH 700
-#define ROW_START_Y 108
+#define ROW_START_Y 150
 #define ROW_HEIGHT 52
-#define BUTTON_Y 580
+#define BUTTON_Y 620
 #define BUTTON_WIDTH 210
 #define BUTTON_HEIGHT 48
 #define LANGUAGE_BUTTON_Y 18
-#define LANGUAGE_BUTTON_WIDTH 58
-#define LANGUAGE_BUTTON_HEIGHT 30
-#define LANGUAGE_BUTTON_GAP 8
+#define LANGUAGE_SELECTOR_WIDTH 124
+#define LANGUAGE_SELECTOR_HEIGHT 30
+#define LANGUAGE_SELECTOR_ARROW_WIDTH 26
 #define LANGUAGE_BUTTON_RIGHT 40
 
 typedef enum Control {
@@ -43,7 +43,7 @@ typedef struct UIState {
     ConfigSettings saved_settings;
     Control focused;
     Control hovered;
-    int hovered_language;
+    int hovered_language_direction;
     bool running;
     char status[160];
 } UIState;
@@ -100,6 +100,69 @@ static void draw_centered_text(SDL_Renderer* renderer,
               scale);
 }
 
+static void draw_wrapped_text(SDL_Renderer* renderer,
+                              float x,
+                              float y,
+                              float maximum_width,
+                              const char* text,
+                              SDL_Color color,
+                              float scale) {
+    char line[512] = { 0 };
+    size_t line_length = 0;
+    const char* word = text;
+
+    while (word != NULL && *word != '\0') {
+        while (*word == ' ') {
+            word++;
+        }
+
+        if (*word == '\0') {
+            break;
+        }
+
+        const char* word_end = word;
+
+        while (*word_end != '\0' && *word_end != ' ') {
+            word_end++;
+        }
+
+        const size_t word_length = (size_t)(word_end - word);
+        const size_t separator_length = line_length > 0 ? 1 : 0;
+
+        if (line_length + separator_length + word_length >= sizeof(line)) {
+            break;
+        }
+
+        char candidate[512];
+        SDL_memcpy(candidate, line, line_length);
+
+        if (separator_length > 0) {
+            candidate[line_length] = ' ';
+        }
+
+        SDL_memcpy(candidate + line_length + separator_length, word, word_length);
+        candidate[line_length + separator_length + word_length] = '\0';
+
+        if (line_length > 0 && AppFont_MeasureText(candidate, scale) > maximum_width) {
+            draw_text(renderer, x, y, line, color, scale);
+            y += AppFont_LineHeight(scale);
+            line_length = 0;
+            SDL_memcpy(line, word, word_length);
+            line[word_length] = '\0';
+            line_length = word_length;
+        } else {
+            SDL_memcpy(line, candidate, line_length + separator_length + word_length + 1);
+            line_length += separator_length + word_length;
+        }
+
+        word = word_end;
+    }
+
+    if (line_length > 0) {
+        draw_text(renderer, x, y, line, color, scale);
+    }
+}
+
 static SDL_FRect control_rect(Control control) {
     if (control >= CONTROL_FULLSCREEN && control <= CONTROL_DRAW_PLAYERS_ABOVE_HUD) {
         return (SDL_FRect){
@@ -123,28 +186,31 @@ static bool point_in_rect(float x, float y, const SDL_FRect* rect) {
     return x >= rect->x && x < (rect->x + rect->w) && y >= rect->y && y < (rect->y + rect->h);
 }
 
-static SDL_FRect language_rect(AppLanguage language) {
-    const float group_width = (LANGUAGE_BUTTON_WIDTH * APP_LANGUAGE_COUNT) +
-                              (LANGUAGE_BUTTON_GAP * (APP_LANGUAGE_COUNT - 1));
+static SDL_FRect language_selector_rect(void) {
     return (SDL_FRect){
-        .x = UI_WIDTH - LANGUAGE_BUTTON_RIGHT - group_width +
-             ((float)language * (LANGUAGE_BUTTON_WIDTH + LANGUAGE_BUTTON_GAP)),
+        .x = UI_WIDTH - LANGUAGE_BUTTON_RIGHT - LANGUAGE_SELECTOR_WIDTH,
         .y = LANGUAGE_BUTTON_Y,
-        .w = LANGUAGE_BUTTON_WIDTH,
-        .h = LANGUAGE_BUTTON_HEIGHT,
+        .w = LANGUAGE_SELECTOR_WIDTH,
+        .h = LANGUAGE_SELECTOR_HEIGHT,
     };
 }
 
-static int language_at(float x, float y) {
-    for (int language = 0; language < APP_LANGUAGE_COUNT; language++) {
-        const SDL_FRect rect = language_rect((AppLanguage)language);
+static int language_direction_at(float x, float y) {
+    const SDL_FRect rect = language_selector_rect();
 
-        if (point_in_rect(x, y, &rect)) {
-            return language;
-        }
+    if (!point_in_rect(x, y, &rect)) {
+        return 0;
     }
 
-    return -1;
+    if (x < rect.x + LANGUAGE_SELECTOR_ARROW_WIDTH) {
+        return -1;
+    }
+
+    if (x >= rect.x + rect.w - LANGUAGE_SELECTOR_ARROW_WIDTH) {
+        return 1;
+    }
+
+    return 0;
 }
 
 static Control control_at(float x, float y) {
@@ -196,7 +262,16 @@ static int scale_mode_index(const char* mode) {
 }
 
 static void set_dirty_status(UIState* state) {
-    SDL_strlcpy(state->status, Localize(TEXT_STATUS_DIRTY), sizeof(state->status));
+    SDL_strlcpy(state->status, Language_Get(TEXT_STATUS_DIRTY), sizeof(state->status));
+}
+
+static void change_language(UIState* state, int direction) {
+    const int language_count = Language_GetCount();
+    const int next_language = ((int)Language_GetCurrent() + direction + language_count) % language_count;
+
+    Language_SetCurrent((AppLanguage)next_language);
+    SDL_SetWindowTitle(state->window, Language_Get(TEXT_APP_NAME));
+    SDL_strlcpy(state->status, Language_Get(TEXT_STATUS_LANGUAGE_CHANGED), sizeof(state->status));
 }
 
 static bool confirm_discard(UIState* state) {
@@ -207,14 +282,14 @@ static bool confirm_discard(UIState* state) {
     const SDL_MessageBoxButtonData buttons[] = {
         { SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT | SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT,
           0,
-          Localize(TEXT_CONTINUE_EDITING) },
-        { 0, 1, Localize(TEXT_DISCARD) },
+          Language_Get(TEXT_CONTINUE_EDITING) },
+        { 0, 1, Language_Get(TEXT_DISCARD) },
     };
     const SDL_MessageBoxData message = {
         .flags = SDL_MESSAGEBOX_WARNING | SDL_MESSAGEBOX_BUTTONS_LEFT_TO_RIGHT,
         .window = state->window,
-        .title = Localize(TEXT_UNSAVED_TITLE),
-        .message = Localize(TEXT_UNSAVED_MESSAGE),
+        .title = Language_Get(TEXT_UNSAVED_TITLE),
+        .message = Language_Get(TEXT_UNSAVED_MESSAGE),
         .numbuttons = (int)SDL_arraysize(buttons),
         .buttons = buttons,
         .colorScheme = NULL,
@@ -233,13 +308,13 @@ static void save_settings(UIState* state) {
     ConfigSettings_Normalize(state->settings);
 
     if (!ConfigFile_Save(state->config_path, state->settings, error, sizeof(error))) {
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, Localize(TEXT_SAVE_ERROR_TITLE), error, state->window);
-        SDL_strlcpy(state->status, Localize(TEXT_STATUS_SAVE_FAILED), sizeof(state->status));
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, Language_Get(TEXT_SAVE_ERROR_TITLE), error, state->window);
+        SDL_strlcpy(state->status, Language_Get(TEXT_STATUS_SAVE_FAILED), sizeof(state->status));
         return;
     }
 
     state->saved_settings = *state->settings;
-    SDL_strlcpy(state->status, Localize(TEXT_STATUS_SAVED), sizeof(state->status));
+    SDL_strlcpy(state->status, Language_Get(TEXT_STATUS_SAVED), sizeof(state->status));
 }
 
 static void adjust_control(UIState* state, Control control, int direction, bool toggle) {
@@ -325,12 +400,10 @@ static void handle_mouse_button(UIState* state, const SDL_MouseButtonEvent* even
         return;
     }
 
-    const int selected_language = language_at(event->x, event->y);
+    const int language_direction = language_direction_at(event->x, event->y);
 
-    if (selected_language >= 0) {
-        Localization_SetLanguage((AppLanguage)selected_language);
-        SDL_SetWindowTitle(state->window, Localize(TEXT_APP_NAME));
-        SDL_strlcpy(state->status, Localize(TEXT_STATUS_LANGUAGE_CHANGED), sizeof(state->status));
+    if (language_direction != 0) {
+        change_language(state, language_direction);
         return;
     }
 
@@ -429,7 +502,7 @@ static void handle_event(UIState* state, SDL_Event* event) {
         break;
     case SDL_EVENT_MOUSE_MOTION:
         state->hovered = control_at(event->motion.x, event->motion.y);
-        state->hovered_language = language_at(event->motion.x, event->motion.y);
+        state->hovered_language_direction = language_direction_at(event->motion.x, event->motion.y);
         break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
         handle_mouse_button(state, &event->button);
@@ -531,70 +604,95 @@ static void draw_button(UIState* state, Control control, const char* label) {
 
     fill_rect(state->renderer, &rect, background);
     draw_rect(state->renderer, &rect, state->focused == control ? COLOR_ACCENT : COLOR_BORDER);
+    float text_scale = 1.25f;
+
+    while (text_scale > 0.75f && AppFont_MeasureText(label, text_scale) > rect.w - 20.0f) {
+        text_scale -= 0.05f;
+    }
+
     draw_centered_text(state->renderer,
                        &rect,
                        label,
                        state->focused == control ? COLOR_BACKGROUND : COLOR_TEXT,
-                       1.25f);
+                       text_scale);
 }
 
-static void draw_language_button(UIState* state, AppLanguage language, const char* label) {
-    const SDL_FRect rect = language_rect(language);
-    const bool active = Localization_GetLanguage() == language;
-    SDL_Color background = COLOR_PANEL;
+static void draw_language_selector(UIState* state) {
+    const SDL_FRect rect = language_selector_rect();
+    const SDL_FRect left_arrow = {
+        .x = rect.x,
+        .y = rect.y,
+        .w = LANGUAGE_SELECTOR_ARROW_WIDTH,
+        .h = rect.h,
+    };
+    const SDL_FRect right_arrow = {
+        .x = rect.x + rect.w - LANGUAGE_SELECTOR_ARROW_WIDTH,
+        .y = rect.y,
+        .w = LANGUAGE_SELECTOR_ARROW_WIDTH,
+        .h = rect.h,
+    };
+    const SDL_FRect language_code = {
+        .x = left_arrow.x + left_arrow.w,
+        .y = rect.y,
+        .w = rect.w - (LANGUAGE_SELECTOR_ARROW_WIDTH * 2),
+        .h = rect.h,
+    };
 
-    if (active) {
-        background = COLOR_ACCENT;
-    } else if (state->hovered_language == language) {
-        background = COLOR_PANEL_HOVER;
+    fill_rect(state->renderer, &rect, COLOR_PANEL);
+    draw_rect(state->renderer, &rect, COLOR_BORDER);
+
+    if (state->hovered_language_direction < 0) {
+        fill_rect(state->renderer, &left_arrow, COLOR_PANEL_HOVER);
+    } else if (state->hovered_language_direction > 0) {
+        fill_rect(state->renderer, &right_arrow, COLOR_PANEL_HOVER);
     }
 
-    fill_rect(state->renderer, &rect, background);
-    draw_rect(state->renderer, &rect, active ? COLOR_ACCENT : COLOR_BORDER);
-    draw_centered_text(state->renderer, &rect, label, active ? COLOR_BACKGROUND : COLOR_TEXT, 0.85f);
+    draw_centered_text(state->renderer, &left_arrow, "<", COLOR_TEXT, 1.0f);
+    draw_centered_text(state->renderer, &language_code, Language_GetCode(Language_GetCurrent()), COLOR_ACCENT, 0.85f);
+    draw_centered_text(state->renderer, &right_arrow, ">", COLOR_TEXT, 1.0f);
 }
 
 static void draw_ui(UIState* state) {
     set_color(state->renderer, COLOR_BACKGROUND);
     SDL_RenderClear(state->renderer);
 
-    draw_text(state->renderer, 40.0f, 14.0f, Localize(TEXT_TITLE), COLOR_ACCENT, 2.0f);
-    draw_language_button(state, APP_LANGUAGE_EN_US, "EN-US");
-    draw_language_button(state, APP_LANGUAGE_PT_BR, "PT-BR");
+    draw_text(state->renderer, 40.0f, 14.0f, Language_Get(TEXT_TITLE), COLOR_ACCENT, 2.0f);
+    draw_language_selector(state);
     draw_text(state->renderer,
               40.0f,
               58.0f,
-              Localize(TEXT_APPLY_NEXT_START),
+              Language_Get(TEXT_APPLY_NEXT_START),
               COLOR_MUTED,
               1.0f);
-    draw_text(state->renderer,
-              40.0f,
-              82.0f,
-              Localize(TEXT_INPUT_HELP),
-              COLOR_MUTED,
-              1.0f);
+    draw_wrapped_text(state->renderer,
+                      40.0f,
+                      82.0f,
+                      ROW_WIDTH,
+                      Language_Get(TEXT_INPUT_HELP),
+                      COLOR_MUTED,
+                      1.0f);
 
-    draw_row(state, CONTROL_FULLSCREEN, Localize(TEXT_FULLSCREEN));
-    draw_row(state, CONTROL_WINDOW_WIDTH, Localize(TEXT_WINDOW_WIDTH));
-    draw_row(state, CONTROL_WINDOW_HEIGHT, Localize(TEXT_WINDOW_HEIGHT));
-    draw_row(state, CONTROL_SCALE_MODE, Localize(TEXT_SCALE_MODE));
-    draw_row(state, CONTROL_BEZEL, Localize(TEXT_BEZEL));
-    draw_row(state, CONTROL_SCANLINES, Localize(TEXT_SCANLINES));
-    draw_row(state, CONTROL_SCANLINE_OPACITY, Localize(TEXT_SCANLINE_OPACITY));
-    draw_row(state, CONTROL_DRAW_PLAYERS_ABOVE_HUD, Localize(TEXT_PLAYERS_ABOVE_HUD));
+    draw_row(state, CONTROL_FULLSCREEN, Language_Get(TEXT_FULLSCREEN));
+    draw_row(state, CONTROL_WINDOW_WIDTH, Language_Get(TEXT_WINDOW_WIDTH));
+    draw_row(state, CONTROL_WINDOW_HEIGHT, Language_Get(TEXT_WINDOW_HEIGHT));
+    draw_row(state, CONTROL_SCALE_MODE, Language_Get(TEXT_SCALE_MODE));
+    draw_row(state, CONTROL_BEZEL, Language_Get(TEXT_BEZEL));
+    draw_row(state, CONTROL_SCANLINES, Language_Get(TEXT_SCANLINES));
+    draw_row(state, CONTROL_SCANLINE_OPACITY, Language_Get(TEXT_SCANLINE_OPACITY));
+    draw_row(state, CONTROL_DRAW_PLAYERS_ABOVE_HUD, Language_Get(TEXT_PLAYERS_ABOVE_HUD));
 
-    draw_button(state, CONTROL_SAVE, Localize(TEXT_SAVE));
-    draw_button(state, CONTROL_DEFAULTS, Localize(TEXT_DEFAULTS));
-    draw_button(state, CONTROL_CANCEL, Localize(TEXT_CANCEL));
+    draw_button(state, CONTROL_SAVE, Language_Get(TEXT_SAVE));
+    draw_button(state, CONTROL_DEFAULTS, Language_Get(TEXT_DEFAULTS));
+    draw_button(state, CONTROL_CANCEL, Language_Get(TEXT_CANCEL));
 
     const SDL_Color status_color = ConfigSettings_Equals(state->settings, &state->saved_settings)
                                        ? COLOR_SUCCESS
                                        : COLOR_MUTED;
-    draw_text(state->renderer, 40.0f, 640.0f, state->status, status_color, 1.0f);
+    draw_text(state->renderer, 40.0f, 682.0f, state->status, status_color, 1.0f);
 
     char path_text[128];
-    SDL_snprintf(path_text, sizeof(path_text), "%s: %.108s", Localize(TEXT_FILE_PREFIX), state->config_path);
-    draw_text(state->renderer, 40.0f, 662.0f, path_text, COLOR_DISABLED, 0.85f);
+    SDL_snprintf(path_text, sizeof(path_text), "%s: %.108s", Language_Get(TEXT_FILE_PREFIX), state->config_path);
+    draw_text(state->renderer, 40.0f, 704.0f, path_text, COLOR_DISABLED, 0.85f);
 
     SDL_RenderPresent(state->renderer);
 }
@@ -612,10 +710,10 @@ bool ConfigUI_Run(SDL_Window* window, SDL_Renderer* renderer, const char* config
         .saved_settings = *settings,
         .focused = CONTROL_FULLSCREEN,
         .hovered = CONTROL_NONE,
-        .hovered_language = -1,
+        .hovered_language_direction = 0,
         .running = true,
     };
-    SDL_strlcpy(state.status, Localize(TEXT_STATUS_LOADED), sizeof(state.status));
+    SDL_strlcpy(state.status, Language_Get(TEXT_STATUS_LOADED), sizeof(state.status));
 
     while (state.running) {
         SDL_Event event;

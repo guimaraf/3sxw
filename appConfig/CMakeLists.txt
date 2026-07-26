@@ -8,6 +8,22 @@ else()
     add_executable(SF3Config ${CONFIG_APP_SRC})
 endif()
 
+if(WIN32)
+    set(SF3CONFIG_ICON_FILE "${CMAKE_SOURCE_DIR}/img/Hugo.ico")
+
+    if(NOT EXISTS "${SF3CONFIG_ICON_FILE}")
+        message(FATAL_ERROR "Required configurator icon was not found: ${SF3CONFIG_ICON_FILE}")
+    endif()
+
+    file(TO_CMAKE_PATH "${SF3CONFIG_ICON_FILE}" SF3CONFIG_ICON_FILE)
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/sf3config.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/sf3config.rc"
+        @ONLY
+    )
+    target_sources(SF3Config PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/sf3config.rc")
+endif()
+
 target_include_directories(SF3Config PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${SDL3_ROOT}/include"

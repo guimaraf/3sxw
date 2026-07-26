@@ -48,6 +48,16 @@ jobs:
 
                 cmake --build build --parallel 2>&1 | tee build.log
 
+          - name: Install portable Windows application
+            run: cmake --install build --prefix build/application
+
+          - name: Upload portable Windows application
+            uses: actions/upload-artifact@v4
+            with:
+                name: 3SXW-Windows
+                path: build/application
+                if-no-files-found: error
+
           - name: Upload build log
             if: always()
             uses: actions/upload-artifact@v4

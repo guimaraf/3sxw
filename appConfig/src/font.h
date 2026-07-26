@@ -6,6 +6,7 @@
 
 bool AppFont_Init(SDL_Renderer* renderer);
 void AppFont_Quit(void);
+/* Text is UTF-8. The Windows font atlas includes the Latin-1 supplement. */
 float AppFont_MeasureText(const char* text, float scale);
 float AppFont_LineHeight(float scale);
 bool AppFont_Draw(SDL_Renderer* renderer,

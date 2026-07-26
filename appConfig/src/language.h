@@ -1,9 +1,10 @@
-#ifndef SF3CONFIG_LOCALIZATION_H
-#define SF3CONFIG_LOCALIZATION_H
+#ifndef SF3CONFIG_LANGUAGE_H
+#define SF3CONFIG_LANGUAGE_H
 
 typedef enum AppLanguage {
     APP_LANGUAGE_EN_US,
     APP_LANGUAGE_PT_BR,
+    APP_LANGUAGE_FR_FRA,
     APP_LANGUAGE_COUNT,
 } AppLanguage;
 
@@ -51,9 +52,11 @@ typedef enum TextId {
     TEXT_COUNT,
 } TextId;
 
-void Localization_Init(void);
-void Localization_SetLanguage(AppLanguage language);
-AppLanguage Localization_GetLanguage(void);
-const char* Localize(TextId text);
+void Language_Init(void);
+void Language_SetCurrent(AppLanguage language);
+AppLanguage Language_GetCurrent(void);
+int Language_GetCount(void);
+const char* Language_GetCode(AppLanguage language);
+const char* Language_Get(TextId text);
 
 #endif

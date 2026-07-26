@@ -75,7 +75,9 @@ The project includes a standalone SDL3 configuration application. On Windows, ru
 
 ![3SXW Configurator in English](img/config.png)
 
-The configurator starts in English (`EN-US`) on every launch. Use the language buttons at the top of the window to switch the complete interface immediately between English and Brazilian Portuguese (`PT-BR`). This choice is limited to the current configurator session and does not add or change any game setting.
+The configurator starts in English (`EN-US`) on every launch. Use the left and right arrows in the `< EN-US >` selector at the top of the window to switch the complete interface immediately between English (`EN-US`), Brazilian Portuguese (`PT-BR`), and French (`FR-FR`). This choice is limited to the current configurator session and does not add or change any game setting.
+
+All built-in configurator text is centralized in `appConfig/src/language.c`. To add another compiled language, add its code to the enum in `appConfig/src/language.h`, add a complete translation entry in `language.c`, and rebuild. The language selector reads this table automatically. On Windows, `sf3config.exe` also embeds `img/Hugo.ico` as its application icon.
 
 The generated configuration uses these defaults:
 
@@ -122,6 +124,8 @@ On Windows, `build.bat` configures, compiles, and installs the portable applicat
 The sound shutdown interface is now declared consistently between the game and port layers, fixing the previous Clang `SPU_Quit` undeclared-function build failure when warnings are treated as errors.
 
 Windows is the primary and extensively tested target. Linux and macOS build and installation flows are prepared, but runtime validation on real Linux and Mac hardware is still pending. See the platform-specific [Windows](docs/buildWindows.md), [Linux](docs/buildLinux.md), and [macOS](docs/buildMac.md) guides.
+
+GitHub Actions builds and installs portable Windows, Linux, and macOS application folders for every push and pull request to `main`. Each platform folder is published as a workflow artifact for download. The separate manual release workflow continues to produce the distributable archives.
 
 ### Gill available from the start
 
@@ -243,7 +247,9 @@ O projeto inclui um aplicativo independente de configuracao feito em SDL3. No Wi
 
 ![Configurador 3SXW em ingles](img/config.png)
 
-O configurador sempre inicia em ingles (`EN-US`). Use os botoes de idioma no topo da janela para alternar imediatamente toda a interface entre ingles e portugues do Brasil (`PT-BR`). A escolha vale somente para a sessao atual do configurador e nao adiciona nem altera nenhuma opcao do jogo.
+O configurador sempre inicia em ingles (`EN-US`). Use as setas esquerda e direita do seletor `< EN-US >` no topo da janela para alternar imediatamente toda a interface entre ingles (`EN-US`), portugues do Brasil (`PT-BR`) e frances (`FR-FR`). A escolha vale somente para a sessao atual do configurador e nao adiciona nem altera nenhuma opcao do jogo.
+
+Todos os textos internos do configurador ficam centralizados em `appConfig/src/language.c`. Para adicionar outro idioma compilado, inclua seu codigo no enum de `appConfig/src/language.h`, adicione uma entrada de traducao completa em `language.c` e recompile. O seletor de idiomas le essa tabela automaticamente. No Windows, o `sf3config.exe` tambem incorpora `img/Hugo.ico` como icone do aplicativo.
 
 A configuracao criada usa estes valores padrao:
 
@@ -290,6 +296,8 @@ No Windows, o `build.bat` configura, compila e instala a aplicacao portatil em R
 A interface de encerramento do sistema de som agora esta declarada de forma consistente entre as camadas do jogo e do port, corrigindo o erro anterior do Clang que informava a funcao `SPU_Quit` como nao declarada quando os avisos eram tratados como erros.
 
 O Windows e a plataforma principal e foi amplamente testado. Os fluxos de compilacao e instalacao para Linux e macOS estao preparados, mas a validacao de execucao em hardware real com Linux e Mac ainda esta pendente. Consulte os guias especificos para [Windows](docs/buildWindows.md), [Linux](docs/buildLinux.md) e [macOS](docs/buildMac.md).
+
+O GitHub Actions compila e instala pastas portateis para Windows, Linux e macOS em cada push e pull request para `main`. A pasta de cada plataforma e publicada como artefato do workflow para download. O workflow manual de release continua responsavel pelos arquivos distribuiveis compactados.
 
 ### Gill disponivel desde o inicio
 

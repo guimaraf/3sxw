@@ -1,6 +1,6 @@
 #include "config_file.h"
 #include "font.h"
-#include "localization.h"
+#include "language.h"
 #include "ui.h"
 
 #include <SDL3/SDL.h>
@@ -12,16 +12,16 @@
 #define UI_HEIGHT 680
 
 static void show_startup_error(const char* message, SDL_Window* window) {
-    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, Localize(TEXT_APP_NAME), message, window);
-    fprintf(stderr, "%s: %s\n", Localize(TEXT_APP_NAME), message);
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, Language_Get(TEXT_APP_NAME), message, window);
+    fprintf(stderr, "%s: %s\n", Language_Get(TEXT_APP_NAME), message);
 }
 
 int main(int argc, char* argv[]) {
     (void)argc;
     (void)argv;
 
-    Localization_Init();
-    SDL_SetAppMetadata(Localize(TEXT_APP_NAME), "1.0", NULL);
+    Language_Init();
+    SDL_SetAppMetadata(Language_Get(TEXT_APP_NAME), "1.0", NULL);
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         show_startup_error(SDL_GetError(), NULL);
@@ -49,7 +49,7 @@ int main(int argc, char* argv[]) {
     SDL_Window* window = NULL;
     SDL_Renderer* renderer = NULL;
 
-    if (!SDL_CreateWindowAndRenderer(Localize(TEXT_APP_NAME), UI_WIDTH, UI_HEIGHT, 0, &window, &renderer)) {
+    if (!SDL_CreateWindowAndRenderer(Language_Get(TEXT_APP_NAME), UI_WIDTH, UI_HEIGHT, 0, &window, &renderer)) {
         show_startup_error(SDL_GetError(), NULL);
         SDL_free(config_path);
         SDL_Quit();
