@@ -118,67 +118,94 @@ endif()
 set(THIRD_PARTY_DIR "${CMAKE_SOURCE_DIR}/third_party")
 find_package(ZLIB REQUIRED)
 
-set(FFMPEG_ROOT        "${THIRD_PARTY_DIR}/ffmpeg/build")
-set(SDL3_ROOT          "${THIRD_PARTY_DIR}/sdl3/build")
-set(LIBCDIO_ROOT       "${THIRD_PARTY_DIR}/libcdio/build")
-set(MINIZIP_NG_ROOT    "${THIRD_PARTY_DIR}/minizip-ng/build")
-set(TF_PSA_CRYPTO_ROOT "${THIRD_PARTY_DIR}/tf-psa-crypto/build")
+if(CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
+    # UWP (vcpkg)
+    find_package(SDL3 REQUIRED)
+    find_package(FFMPEG REQUIRED)
+    find_package(MINIZIP REQUIRED)
+    find_package(MbedTLS REQUIRED)
+    # libcdio via find_library or pkgconfig. vcpkg installs it as standard libraries
+    find_library(LIBCDIO_LIB cdio REQUIRED)
+    find_library(LIBISO9660_LIB iso9660 REQUIRED)
 
-include_directories(
-    ${FFMPEG_ROOT}/include
-    ${SDL3_ROOT}/include
-    ${LIBCDIO_ROOT}/include
-    ${MINIZIP_NG_ROOT}/include
-    ${TF_PSA_CRYPTO_ROOT}/include
-)
-
-target_link_libraries(SF3 PRIVATE
-    m
-    "${LIBCDIO_ROOT}/lib/libiso9660.a"
-    "${LIBCDIO_ROOT}/lib/libcdio.a"
-    "${MINIZIP_NG_ROOT}/lib/libminizip-ng.a"
-    "${TF_PSA_CRYPTO_ROOT}/lib/libtfpsacrypto.a"
-    ZLIB::ZLIB
-)
-
-if(APPLE)
     target_link_libraries(SF3 PRIVATE
-        ${FFMPEG_ROOT}/lib/libavcodec.dylib
-        ${FFMPEG_ROOT}/lib/libavformat.dylib
-        ${FFMPEG_ROOT}/lib/libavutil.dylib
-        ${FFMPEG_ROOT}/lib/libswresample.dylib
-        ${SDL3_ROOT}/lib/libSDL3.0.dylib
-        iconv
-    )
-elseif(WIN32)
-    target_link_libraries(SF3 PRIVATE
-        ${FFMPEG_ROOT}/lib/libavcodec.dll.a
-        ${FFMPEG_ROOT}/lib/libavformat.dll.a
-        ${FFMPEG_ROOT}/lib/libavutil.dll.a
-        ${FFMPEG_ROOT}/lib/libswresample.dll.a
-        ${SDL3_ROOT}/lib/libSDL3.dll.a
-        iconv
+        SDL3::SDL3
+        FFMPEG::avcodec FFMPEG::avformat FFMPEG::avutil FFMPEG::swresample
+        MINIZIP::minizip
+        ${LIBCDIO_LIB}
+        ${LIBISO9660_LIB}
+        MbedTLS::mbedcrypto
+        ZLIB::ZLIB
         bcrypt
-		dbghelp
         ws2_32
         iphlpapi
     )
-    target_link_options(SF3 PRIVATE
-        "$<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:--for-linker>"
-        "$<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:--pdb=SF3.pdb>"
+else()
+    # PC (standalone scripts)
+    set(FFMPEG_ROOT        "${THIRD_PARTY_DIR}/ffmpeg/build")
+    set(SDL3_ROOT          "${THIRD_PARTY_DIR}/sdl3/build")
+    set(LIBCDIO_ROOT       "${THIRD_PARTY_DIR}/libcdio/build")
+    set(MINIZIP_NG_ROOT    "${THIRD_PARTY_DIR}/minizip-ng/build")
+    set(TF_PSA_CRYPTO_ROOT "${THIRD_PARTY_DIR}/tf-psa-crypto/build")
+
+    include_directories(
+        ${FFMPEG_ROOT}/include
+        ${SDL3_ROOT}/include
+        ${LIBCDIO_ROOT}/include
+        ${MINIZIP_NG_ROOT}/include
+        ${TF_PSA_CRYPTO_ROOT}/include
     )
-elseif(UNIX)
+
     target_link_libraries(SF3 PRIVATE
-        ${FFMPEG_ROOT}/lib/libavcodec.so
-        ${FFMPEG_ROOT}/lib/libavformat.so
-        ${FFMPEG_ROOT}/lib/libavutil.so
-        ${FFMPEG_ROOT}/lib/libswresample.so
-        ${SDL3_ROOT}/lib/libSDL3.so
+        m
+        "${LIBCDIO_ROOT}/lib/libiso9660.a"
+        "${LIBCDIO_ROOT}/lib/libcdio.a"
+        "${MINIZIP_NG_ROOT}/lib/libminizip-ng.a"
+        "${TF_PSA_CRYPTO_ROOT}/lib/libtfpsacrypto.a"
+        ZLIB::ZLIB
     )
+
+    if(APPLE)
+        target_link_libraries(SF3 PRIVATE
+            ${FFMPEG_ROOT}/lib/libavcodec.dylib
+            ${FFMPEG_ROOT}/lib/libavformat.dylib
+            ${FFMPEG_ROOT}/lib/libavutil.dylib
+            ${FFMPEG_ROOT}/lib/libswresample.dylib
+            ${SDL3_ROOT}/lib/libSDL3.0.dylib
+            iconv
+        )
+    elseif(WIN32)
+        target_link_libraries(SF3 PRIVATE
+            ${FFMPEG_ROOT}/lib/libavcodec.dll.a
+            ${FFMPEG_ROOT}/lib/libavformat.dll.a
+            ${FFMPEG_ROOT}/lib/libavutil.dll.a
+            ${FFMPEG_ROOT}/lib/libswresample.dll.a
+            ${SDL3_ROOT}/lib/libSDL3.dll.a
+            iconv
+            bcrypt
+            dbghelp
+            ws2_32
+            iphlpapi
+        )
+        target_link_options(SF3 PRIVATE
+            "$<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:--for-linker>"
+            "$<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:--pdb=SF3.pdb>"
+        )
+    elseif(UNIX)
+        target_link_libraries(SF3 PRIVATE
+            ${FFMPEG_ROOT}/lib/libavcodec.so
+            ${FFMPEG_ROOT}/lib/libavformat.so
+            ${FFMPEG_ROOT}/lib/libavutil.so
+            ${FFMPEG_ROOT}/lib/libswresample.so
+            ${SDL3_ROOT}/lib/libSDL3.so
+        )
+    endif()
 endif()
 
 # Build the standalone configuration application in its requested directory.
-add_subdirectory(appConfig "${CMAKE_SOURCE_DIR}/appConfig/build")
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
+    add_subdirectory(appConfig "${CMAKE_SOURCE_DIR}/appConfig/build")
+endif()
 
 # ======================================
 # Installation
