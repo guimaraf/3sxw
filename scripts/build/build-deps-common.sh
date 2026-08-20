@@ -49,7 +49,7 @@ else
     cd "$FFMPEG_DIR"
 
     if [ ! -d "$FFMPEG" ]; then
-        curl -L -O "https://ffmpeg.org/releases/$FFMPEG.tar.xz"
+        curl --retry 5 --retry-delay 5 --retry-connrefused -L -O "https://ffmpeg.org/releases/$FFMPEG.tar.xz"
         tar xf "$FFMPEG.tar.xz"
     fi
 
@@ -122,7 +122,7 @@ else
     cd "$SDL_DIR"
 
     if [ ! -d "$SDL" ]; then
-        curl -L -O "https://libsdl.org/release/$SDL.tar.gz"
+        curl --retry 5 --retry-delay 5 --retry-connrefused -L -O "https://libsdl.org/release/$SDL.tar.gz"
         tar xf "$SDL.tar.gz"
     fi
 
@@ -168,7 +168,7 @@ else
     cd "$LIBCDIO_DIR"
 
     if [ ! -d "$LIBCDIO" ]; then
-        curl -L -O "https://github.com/libcdio/libcdio/releases/download/$LIBCDIO_VERSION/$LIBCDIO.tar.gz"
+        curl --retry 5 --retry-delay 5 --retry-connrefused -L -O "https://github.com/libcdio/libcdio/releases/download/$LIBCDIO_VERSION/$LIBCDIO.tar.gz"
         tar xf "$LIBCDIO.tar.gz"
     fi
 
@@ -247,7 +247,7 @@ else
     mkdir -p "$TF_PSA_CRYPTO_BUILD"
     TF_PSA_CRYPTO_SRC=$(mktemp -d)
 
-    curl -L -o "$TF_PSA_CRYPTO_SRC/tf-psa-crypto.tar.bz2" "$TF_PSA_CRYPTO_URL"
+    curl --retry 5 --retry-delay 5 --retry-connrefused -L -o "$TF_PSA_CRYPTO_SRC/tf-psa-crypto.tar.bz2" "$TF_PSA_CRYPTO_URL"
     tar xf "$TF_PSA_CRYPTO_SRC/tf-psa-crypto.tar.bz2" -C "$TF_PSA_CRYPTO_SRC"
 
     cmake -S "$TF_PSA_CRYPTO_SRC/tf-psa-crypto-$TF_PSA_CRYPTO_VERSION" -B "$TF_PSA_CRYPTO_SRC/cmake-build" \
