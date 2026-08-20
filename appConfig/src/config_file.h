@@ -11,6 +11,8 @@ typedef struct ConfigSettings {
     int window_width;
     int window_height;
     char scale_mode[CONFIG_SCALE_MODE_LENGTH];
+    char aspect_ratio[CONFIG_SCALE_MODE_LENGTH];
+    char frame_timing[CONFIG_SCALE_MODE_LENGTH];
     bool bezel;
     bool scanlines;
     int scanline_opacity;

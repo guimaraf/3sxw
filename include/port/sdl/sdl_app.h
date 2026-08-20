@@ -3,8 +3,6 @@
 
 #include <SDL3/SDL.h>
 
-#define TARGET_FPS 59.59949
-
 #include "port/sdl/sdl_game_renderer.h"
 
 typedef struct SDLAppFrameTiming {
@@ -33,6 +31,8 @@ void SDLApp_Quit();
 bool SDLApp_PollEvents();
 bool SDLApp_ConsumePauseRequest();
 bool SDLApp_HasInputFocus();
+double SDLApp_GetTargetFrameRate();
+const char* SDLApp_GetFrameTimingName();
 
 void SDLApp_BeginFrame();
 void SDLApp_EndFrame(SDLAppFrameTiming* timing);

@@ -80,12 +80,12 @@ static SDL_Surface* load_bezel_surface(const char* path) {
     return rgba_surface;
 }
 
-bool SDLBezel_Init(SDL_Renderer* renderer) {
+bool SDLBezel_Init(SDL_Renderer* renderer, const char* image_name) {
     if (bezel_texture != NULL) {
         return true;
     }
 
-    if (renderer == NULL) {
+    if (renderer == NULL || image_name == NULL || image_name[0] == '\0') {
         log_error("Couldn't initialize the bezel without an SDL renderer.");
         return false;
     }
@@ -99,7 +99,7 @@ bool SDLBezel_Init(SDL_Renderer* renderer) {
 
     char* bezel_path = NULL;
 
-    if (SDL_asprintf(&bezel_path, "%simg/bezel.png", data_path) < 0 || bezel_path == NULL) {
+    if (SDL_asprintf(&bezel_path, "%simg/%s", data_path, image_name) < 0 || bezel_path == NULL) {
         log_error("Couldn't allocate the bezel image path.");
         return false;
     }

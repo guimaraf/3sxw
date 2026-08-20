@@ -272,10 +272,19 @@ elseif(UNIX)
 endif()
 
 set(BEZEL_IMAGE_FILE "${CMAKE_SOURCE_DIR}/img/bezel.png")
+set(PIXEL_PERFECT_BEZEL_IMAGE_FILE "${CMAKE_SOURCE_DIR}/img/bezel-pixel-perfect.png")
+set(BEZEL_2_IMAGE_FILE "${CMAKE_SOURCE_DIR}/img/bezel2.png")
+set(BEZEL_3_IMAGE_FILE "${CMAKE_SOURCE_DIR}/img/bezel3.png")
 
-if(NOT EXISTS "${BEZEL_IMAGE_FILE}")
-    message(FATAL_ERROR "Required bezel image was not found: ${BEZEL_IMAGE_FILE}")
-endif()
+foreach(REQUIRED_BEZEL_IMAGE_FILE IN ITEMS
+        "${BEZEL_IMAGE_FILE}"
+        "${PIXEL_PERFECT_BEZEL_IMAGE_FILE}"
+        "${BEZEL_2_IMAGE_FILE}"
+        "${BEZEL_3_IMAGE_FILE}")
+    if(NOT EXISTS "${REQUIRED_BEZEL_IMAGE_FILE}")
+        message(FATAL_ERROR "Required bezel image was not found: ${REQUIRED_BEZEL_IMAGE_FILE}")
+    endif()
+endforeach()
 
 if(APPLE)
     set(GAME_DATA_INSTALL_DIR "3SX.app/Contents/MacOS/data")
@@ -283,7 +292,11 @@ else()
     set(GAME_DATA_INSTALL_DIR "bin/data")
 endif()
 
-install(FILES "${BEZEL_IMAGE_FILE}"
+install(FILES
+    "${BEZEL_IMAGE_FILE}"
+    "${PIXEL_PERFECT_BEZEL_IMAGE_FILE}"
+    "${BEZEL_2_IMAGE_FILE}"
+    "${BEZEL_3_IMAGE_FILE}"
     DESTINATION "${GAME_DATA_INSTALL_DIR}/img"
 )
 

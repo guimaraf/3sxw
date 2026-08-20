@@ -8,9 +8,6 @@
 
 #include <stdio.h>
 
-#define UI_WIDTH 780
-#define UI_HEIGHT 680
-
 static void show_startup_error(const char* message, SDL_Window* window) {
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, Language_Get(TEXT_APP_NAME), message, window);
     fprintf(stderr, "%s: %s\n", Language_Get(TEXT_APP_NAME), message);
@@ -49,14 +46,17 @@ int main(int argc, char* argv[]) {
     SDL_Window* window = NULL;
     SDL_Renderer* renderer = NULL;
 
-    if (!SDL_CreateWindowAndRenderer(Language_Get(TEXT_APP_NAME), UI_WIDTH, UI_HEIGHT, 0, &window, &renderer)) {
+    if (!SDL_CreateWindowAndRenderer(Language_Get(TEXT_APP_NAME), CONFIG_UI_WIDTH, CONFIG_UI_HEIGHT, 0, &window, &renderer)) {
         show_startup_error(SDL_GetError(), NULL);
         SDL_free(config_path);
         SDL_Quit();
         return 1;
     }
 
-    if (!SDL_SetRenderLogicalPresentation(renderer, UI_WIDTH, UI_HEIGHT, SDL_LOGICAL_PRESENTATION_LETTERBOX)) {
+    if (!SDL_SetRenderLogicalPresentation(renderer,
+                                          CONFIG_UI_WIDTH,
+                                          CONFIG_UI_HEIGHT,
+                                          SDL_LOGICAL_PRESENTATION_LETTERBOX)) {
         show_startup_error(SDL_GetError(), window);
         SDL_DestroyRenderer(renderer);
         SDL_DestroyWindow(window);

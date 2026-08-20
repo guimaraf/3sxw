@@ -7,6 +7,8 @@
 #define CFG_KEY_WINDOW_WIDTH "window-width"
 #define CFG_KEY_WINDOW_HEIGHT "window-height"
 #define CFG_KEY_SCALEMODE "scale-mode"
+#define CFG_KEY_ASPECT_RATIO "aspect-ratio"
+#define CFG_KEY_FRAME_TIMING "frame-timing"
 #define CFG_KEY_BEZEL "bezel"
 #define CFG_KEY_SCANLINES "scanlines"
 #define CFG_KEY_SCANLINE_OPACITY "scanline-opacity"

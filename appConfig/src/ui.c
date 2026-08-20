@@ -4,13 +4,13 @@
 
 #include <SDL3/SDL.h>
 
-#define UI_WIDTH 780
-#define UI_HEIGHT 730
+#define UI_WIDTH CONFIG_UI_WIDTH
+#define UI_HEIGHT CONFIG_UI_HEIGHT
 #define ROW_X 40
 #define ROW_WIDTH 700
 #define ROW_START_Y 150
 #define ROW_HEIGHT 52
-#define BUTTON_Y 620
+#define BUTTON_Y 720
 #define BUTTON_WIDTH 210
 #define BUTTON_HEIGHT 48
 #define LANGUAGE_BUTTON_Y 18
@@ -23,7 +23,9 @@ typedef enum Control {
     CONTROL_FULLSCREEN,
     CONTROL_WINDOW_WIDTH,
     CONTROL_WINDOW_HEIGHT,
+    CONTROL_ASPECT_RATIO,
     CONTROL_SCALE_MODE,
+    CONTROL_FRAME_TIMING,
     CONTROL_BEZEL,
     CONTROL_SCANLINES,
     CONTROL_SCANLINE_OPACITY,
@@ -59,12 +61,21 @@ static const SDL_Color COLOR_MUTED = { 156, 166, 187, 255 };
 static const SDL_Color COLOR_DISABLED = { 91, 98, 113, 255 };
 static const SDL_Color COLOR_SUCCESS = { 105, 209, 140, 255 };
 
-static const char* scale_modes[] = {
+static const char* const scale_modes[] = {
     "nearest",
     "linear",
     "soft-linear",
-    "integer",
     "square-pixels",
+};
+
+static const char* const aspect_ratios[] = {
+    "preserve",
+    "stretch",
+};
+
+static const char* const frame_timings[] = {
+    "arcade",
+    "ps2",
 };
 
 static void set_color(SDL_Renderer* renderer, SDL_Color color) {
@@ -234,6 +245,10 @@ static bool control_is_enabled(const UIState* state, Control control) {
         return false;
     }
 
+    if (control == CONTROL_BEZEL && SDL_strcmp(state->settings->aspect_ratio, "stretch") == 0) {
+        return false;
+    }
+
     return true;
 }
 
@@ -251,14 +266,37 @@ static Control next_enabled_control(const UIState* state, Control start, int dir
     return start;
 }
 
-static int scale_mode_index(const char* mode) {
-    for (size_t i = 0; i < SDL_arraysize(scale_modes); i++) {
+static size_t available_scale_mode_count(const UIState* state) {
+    return SDL_strcmp(state->settings->aspect_ratio, "stretch") == 0 ? SDL_arraysize(scale_modes) - 1
+                                                                        : SDL_arraysize(scale_modes);
+}
+
+static int scale_mode_index(const char* mode, size_t mode_count) {
+    for (size_t i = 0; i < mode_count; i++) {
         if (SDL_strcmp(mode, scale_modes[i]) == 0) {
             return (int)i;
         }
     }
 
     return 0;
+}
+
+static int option_index(const char* value, const char* const* options, size_t option_count) {
+    for (size_t i = 0; i < option_count; i++) {
+        if (SDL_strcmp(value, options[i]) == 0) {
+            return (int)i;
+        }
+    }
+
+    return 0;
+}
+
+static const char* aspect_ratio_display_name(const char* ratio) {
+    return SDL_strcmp(ratio, "stretch") == 0 ? "Stretch 16:9" : "4:3";
+}
+
+static const char* frame_timing_display_name(const char* timing) {
+    return SDL_strcmp(timing, "ps2") == 0 ? "PS2" : "Arcade";
 }
 
 static void set_dirty_status(UIState* state) {
@@ -332,10 +370,24 @@ static void adjust_control(UIState* state, Control control, int direction, bool 
     case CONTROL_WINDOW_HEIGHT:
         state->settings->window_height += direction * 9;
         break;
+    case CONTROL_ASPECT_RATIO: {
+        const int count = (int)SDL_arraysize(aspect_ratios);
+        const int index =
+            (option_index(state->settings->aspect_ratio, aspect_ratios, SDL_arraysize(aspect_ratios)) + direction + count) % count;
+        SDL_strlcpy(state->settings->aspect_ratio, aspect_ratios[index], sizeof(state->settings->aspect_ratio));
+        break;
+    }
     case CONTROL_SCALE_MODE: {
-        const int count = (int)SDL_arraysize(scale_modes);
-        const int index = (scale_mode_index(state->settings->scale_mode) + direction + count) % count;
+        const int count = (int)available_scale_mode_count(state);
+        const int index = (scale_mode_index(state->settings->scale_mode, (size_t)count) + direction + count) % count;
         SDL_strlcpy(state->settings->scale_mode, scale_modes[index], sizeof(state->settings->scale_mode));
+        break;
+    }
+    case CONTROL_FRAME_TIMING: {
+        const int count = (int)SDL_arraysize(frame_timings);
+        const int index =
+            (option_index(state->settings->frame_timing, frame_timings, SDL_arraysize(frame_timings)) + direction + count) % count;
+        SDL_strlcpy(state->settings->frame_timing, frame_timings[index], sizeof(state->settings->frame_timing));
         break;
     }
     case CONTROL_BEZEL:
@@ -417,8 +469,8 @@ static void handle_mouse_button(UIState* state, const SDL_MouseButtonEvent* even
     const SDL_FRect rect = control_rect(control);
     int direction = 1;
 
-    if (control == CONTROL_WINDOW_WIDTH || control == CONTROL_WINDOW_HEIGHT || control == CONTROL_SCALE_MODE ||
-        control == CONTROL_SCANLINE_OPACITY) {
+    if (control == CONTROL_WINDOW_WIDTH || control == CONTROL_WINDOW_HEIGHT || control == CONTROL_ASPECT_RATIO ||
+        control == CONTROL_SCALE_MODE || control == CONTROL_FRAME_TIMING || control == CONTROL_SCANLINE_OPACITY) {
         const float adjuster_start = rect.x + rect.w - 205.0f;
 
         if (event->x < adjuster_start) {
@@ -571,8 +623,14 @@ static void draw_row(UIState* state, Control control, const char* label) {
         SDL_snprintf(value, sizeof(value), "%d", state->settings->window_height);
         draw_adjuster(state, &row, value, enabled);
         break;
+    case CONTROL_ASPECT_RATIO:
+        draw_adjuster(state, &row, aspect_ratio_display_name(state->settings->aspect_ratio), enabled);
+        break;
     case CONTROL_SCALE_MODE:
         draw_adjuster(state, &row, state->settings->scale_mode, enabled);
+        break;
+    case CONTROL_FRAME_TIMING:
+        draw_adjuster(state, &row, frame_timing_display_name(state->settings->frame_timing), enabled);
         break;
     case CONTROL_BEZEL:
         draw_checkbox(state, &row, state->settings->bezel, enabled);
@@ -675,7 +733,9 @@ static void draw_ui(UIState* state) {
     draw_row(state, CONTROL_FULLSCREEN, Language_Get(TEXT_FULLSCREEN));
     draw_row(state, CONTROL_WINDOW_WIDTH, Language_Get(TEXT_WINDOW_WIDTH));
     draw_row(state, CONTROL_WINDOW_HEIGHT, Language_Get(TEXT_WINDOW_HEIGHT));
+    draw_row(state, CONTROL_ASPECT_RATIO, Language_Get(TEXT_ASPECT_RATIO));
     draw_row(state, CONTROL_SCALE_MODE, Language_Get(TEXT_SCALE_MODE));
+    draw_row(state, CONTROL_FRAME_TIMING, Language_Get(TEXT_FRAME_TIMING));
     draw_row(state, CONTROL_BEZEL, Language_Get(TEXT_BEZEL));
     draw_row(state, CONTROL_SCANLINES, Language_Get(TEXT_SCANLINES));
     draw_row(state, CONTROL_SCANLINE_OPACITY, Language_Get(TEXT_SCANLINE_OPACITY));
@@ -688,11 +748,11 @@ static void draw_ui(UIState* state) {
     const SDL_Color status_color = ConfigSettings_Equals(state->settings, &state->saved_settings)
                                        ? COLOR_SUCCESS
                                        : COLOR_MUTED;
-    draw_text(state->renderer, 40.0f, 682.0f, state->status, status_color, 1.0f);
+    draw_text(state->renderer, 40.0f, 782.0f, state->status, status_color, 1.0f);
 
     char path_text[128];
     SDL_snprintf(path_text, sizeof(path_text), "%s: %.108s", Language_Get(TEXT_FILE_PREFIX), state->config_path);
-    draw_text(state->renderer, 40.0f, 704.0f, path_text, COLOR_DISABLED, 0.85f);
+    draw_text(state->renderer, 40.0f, 804.0f, path_text, COLOR_DISABLED, 0.85f);
 
     SDL_RenderPresent(state->renderer);
 }

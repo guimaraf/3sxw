@@ -20,6 +20,8 @@ typedef enum SettingIndex {
     SETTING_WINDOW_WIDTH,
     SETTING_WINDOW_HEIGHT,
     SETTING_SCALE_MODE,
+    SETTING_ASPECT_RATIO,
+    SETTING_FRAME_TIMING,
     SETTING_BEZEL,
     SETTING_SCANLINES,
     SETTING_SCANLINE_OPACITY,
@@ -32,6 +34,8 @@ static const char* setting_keys[SETTING_COUNT] = {
     "window-width",
     "window-height",
     "scale-mode",
+    "aspect-ratio",
+    "frame-timing",
     "bezel",
     "scanlines",
     "scanline-opacity",
@@ -43,7 +47,6 @@ static bool is_valid_scale_mode(const char* value) {
         "nearest",
         "linear",
         "soft-linear",
-        "integer",
         "square-pixels",
     };
 
@@ -54,6 +57,14 @@ static bool is_valid_scale_mode(const char* value) {
     }
 
     return false;
+}
+
+static bool is_valid_aspect_ratio(const char* value) {
+    return SDL_strcmp(value, "preserve") == 0 || SDL_strcmp(value, "stretch") == 0;
+}
+
+static bool is_valid_frame_timing(const char* value) {
+    return SDL_strcmp(value, "arcade") == 0 || SDL_strcmp(value, "ps2") == 0;
 }
 
 static int clamp_int(int value, int minimum, int maximum) {
@@ -77,6 +88,8 @@ void ConfigSettings_SetDefaults(ConfigSettings* settings) {
     settings->window_width = 640;
     settings->window_height = 480;
     SDL_strlcpy(settings->scale_mode, "nearest", sizeof(settings->scale_mode));
+    SDL_strlcpy(settings->aspect_ratio, "preserve", sizeof(settings->aspect_ratio));
+    SDL_strlcpy(settings->frame_timing, "arcade", sizeof(settings->frame_timing));
     settings->bezel = false;
     settings->scanlines = false;
     settings->scanline_opacity = 20;
@@ -92,8 +105,28 @@ void ConfigSettings_Normalize(ConfigSettings* settings) {
     settings->window_height = clamp_int(settings->window_height, WINDOW_HEIGHT_MIN, WINDOW_HEIGHT_MAX);
     settings->scanline_opacity = clamp_int(settings->scanline_opacity, 0, 100);
 
+    if (SDL_strcmp(settings->scale_mode, "integer") == 0 || SDL_strcmp(settings->scale_mode, "arcade-integer") == 0) {
+        SDL_strlcpy(settings->scale_mode, "square-pixels", sizeof(settings->scale_mode));
+    }
+
     if (!is_valid_scale_mode(settings->scale_mode)) {
         SDL_strlcpy(settings->scale_mode, "nearest", sizeof(settings->scale_mode));
+    }
+
+    if (!is_valid_aspect_ratio(settings->aspect_ratio)) {
+        SDL_strlcpy(settings->aspect_ratio, "preserve", sizeof(settings->aspect_ratio));
+    }
+
+    if (SDL_strcmp(settings->aspect_ratio, "stretch") == 0) {
+        if (SDL_strcmp(settings->scale_mode, "square-pixels") == 0) {
+            SDL_strlcpy(settings->scale_mode, "nearest", sizeof(settings->scale_mode));
+        }
+
+        settings->bezel = false;
+    }
+
+    if (!is_valid_frame_timing(settings->frame_timing)) {
+        SDL_strlcpy(settings->frame_timing, "arcade", sizeof(settings->frame_timing));
     }
 }
 
@@ -104,6 +137,8 @@ bool ConfigSettings_Equals(const ConfigSettings* left, const ConfigSettings* rig
 
     return left->fullscreen == right->fullscreen && left->window_width == right->window_width &&
            left->window_height == right->window_height && SDL_strcmp(left->scale_mode, right->scale_mode) == 0 &&
+           SDL_strcmp(left->aspect_ratio, right->aspect_ratio) == 0 &&
+           SDL_strcmp(left->frame_timing, right->frame_timing) == 0 &&
            left->bezel == right->bezel && left->scanlines == right->scanlines &&
            left->scanline_opacity == right->scanline_opacity &&
            left->draw_players_above_hud == right->draw_players_above_hud;
@@ -225,6 +260,16 @@ static void apply_setting(ConfigSettings* settings, const char* key, const char*
     } else if (SDL_strcmp(key, "scale-mode") == 0) {
         if (is_valid_scale_mode(value)) {
             SDL_strlcpy(settings->scale_mode, value, sizeof(settings->scale_mode));
+        } else if (SDL_strcmp(value, "integer") == 0 || SDL_strcmp(value, "arcade-integer") == 0) {
+            SDL_strlcpy(settings->scale_mode, "square-pixels", sizeof(settings->scale_mode));
+        }
+    } else if (SDL_strcmp(key, "aspect-ratio") == 0) {
+        if (is_valid_aspect_ratio(value)) {
+            SDL_strlcpy(settings->aspect_ratio, value, sizeof(settings->aspect_ratio));
+        }
+    } else if (SDL_strcmp(key, "frame-timing") == 0) {
+        if (is_valid_frame_timing(value)) {
+            SDL_strlcpy(settings->frame_timing, value, sizeof(settings->frame_timing));
         }
     } else if (SDL_strcmp(key, "bezel") == 0) {
         parse_bool(value, &settings->bezel);
@@ -303,6 +348,12 @@ static bool write_setting(FILE* file, SettingIndex setting, const ConfigSettings
         break;
     case SETTING_SCALE_MODE:
         result = fprintf(file, "scale-mode = %s\n", settings->scale_mode);
+        break;
+    case SETTING_ASPECT_RATIO:
+        result = fprintf(file, "aspect-ratio = %s\n", settings->aspect_ratio);
+        break;
+    case SETTING_FRAME_TIMING:
+        result = fprintf(file, "frame-timing = %s\n", settings->frame_timing);
         break;
     case SETTING_BEZEL:
         result = fprintf(file, "bezel = %s\n", settings->bezel ? "true" : "false");

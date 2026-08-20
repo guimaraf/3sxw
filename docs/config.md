@@ -27,16 +27,31 @@ Possible values:
 - `nearest`
 - `linear`
 - `soft-linear`: Produces an image with a balance of sharpness and sizing consistency
-- `integer`: Produces a pixel-perfect image, but requires a 4K display (⚠️ WARNING: the image will be cropped if your display resolution is smaller than 2688x2016)
-- `square-pixels`: The internal buffer is scaled up by an integer (whole number) factor. Use this if you play on a CRT
+- `square-pixels`: Uses a corrected 300x224 presentation grid. At 1920x1080 it produces a 1200x896 game area aligned with the Capcom bezel
+
+### `aspect-ratio`
+
+Controls the presentation shape. Default value: `preserve`.
+
+Possible values:
+- `preserve`: Keeps the original 4:3 image with black bars when needed
+- `stretch`: Fills the complete output horizontally and vertically. The configurator changes `square-pixels` to `nearest` and clears the bezel setting in this mode
+
+### `frame-timing`
+
+Controls the full game frame cadence. Default value: `arcade`.
+
+Possible values:
+- `arcade`: 59.59949 FPS, preserving the port's previous timing
+- `ps2`: 60000/1001 FPS (approximately 59.94)
 
 ### `bezel`
 
-Displays the optional `data/img/bezel.png` image only in fullscreen mode on a 16:9 renderer output. Default value: `false`.
+Displays an optional bezel only in fullscreen mode on a 16:9 renderer output while `aspect-ratio` is `preserve`. With `scale-mode = square-pixels`, the game loads `data/img/bezel-pixel-perfect.png`; all other modes load `data/img/bezel.png`. Default value: `false`.
 
 ### `scanlines`
 
-Applies scanlines only to the 4:3 game image in windowed and fullscreen modes. Default value: `false`.
+Applies scanlines only to the rendered game image in windowed and fullscreen modes, including preserved 4:3 and stretched presentation. Default value: `false`.
 
 ### `scanline-opacity`
 
@@ -82,16 +97,31 @@ Valores possíveis:
 - `nearest`
 - `linear`
 - `soft-linear`: Produz uma imagem com equilíbrio entre nitidez e consistência de tamanho
-- `integer`: Produz uma imagem pixel-perfect, mas requer um monitor 4K (⚠️ AVISO: a imagem será cortada se a resolução do monitor for menor que 2688x2016)
-- `square-pixels`: O buffer interno é escalado por um fator inteiro. Use isso se jogar em um CRT
+- `square-pixels`: Usa uma grade de apresentacao corrigida de 300x224. Em 1920x1080 produz uma area de jogo de 1200x896 alinhada com a moldura Capcom
+
+### `aspect-ratio`
+
+Controla o formato de apresentacao. Valor padrao: `preserve`.
+
+Valores possiveis:
+- `preserve`: Mantem a imagem original em 4:3 com barras pretas quando necessario
+- `stretch`: Preenche toda a saida horizontal e verticalmente. O configurador altera `square-pixels` para `nearest` e desmarca a moldura neste modo
+
+### `frame-timing`
+
+Controla a cadencia completa dos frames do jogo. Valor padrao: `arcade`.
+
+Valores possiveis:
+- `arcade`: 59.59949 FPS, preservando a cadencia anterior do port
+- `ps2`: 60000/1001 FPS (aproximadamente 59.94)
 
 ### `bezel`
 
-Exibe a imagem opcional `data/img/bezel.png` somente no modo tela cheia quando a saída do renderer está em 16:9. Valor padrão: `false`.
+Exibe uma moldura opcional somente no modo tela cheia quando a saída do renderer está em 16:9 e `aspect-ratio` usa `preserve`. Com `scale-mode = square-pixels`, o jogo carrega `data/img/bezel-pixel-perfect.png`; os demais modos carregam `data/img/bezel.png`. Valor padrão: `false`.
 
 ### `scanlines`
 
-Aplica scanlines somente à imagem 4:3 do jogo, tanto no modo janela quanto em tela cheia. Valor padrão: `false`.
+Aplica scanlines somente à imagem renderizada do jogo, tanto no modo janela quanto em tela cheia, incluindo apresentação 4:3 preservada e esticada. Valor padrão: `false`.
 
 ### `scanline-opacity`
 

@@ -39,7 +39,7 @@ In the original project, save files, configuration, and other data were stored i
 | Key mapping | `<game folder>/data/keymap` |
 | Critical error log | `<game folder>/data/error.log` |
 | Screenshots | `<game folder>/prints/` |
-| Optional bezel | `<game folder>/data/img/bezel.png` |
+| Optional bezels | `<game folder>/data/img/bezel.png` and `bezel-pixel-perfect.png` |
 | Required game resource | `<game folder>/resources/SF33RD.AFS` |
 
 This makes the game 100% portable: just copy the folder to another location or computer and everything will work without reinstalling. Startup also verifies that the local `data/` directory can be created, written, read, and cleaned up before the game begins using it.
@@ -57,21 +57,21 @@ This makes the game 100% portable: just copy the folder to another location or c
 
 ### Optional 16:9 bezel
 
-The installation step copies the bundled `img/bezel.png` to `<game folder>/data/img/bezel.png`. Set `bezel = true` in `<game folder>/data/config` to display it around the 4:3 game area. The setting defaults to `false`.
+The installation step copies the bundled `img/bezel.png`, `img/bezel-pixel-perfect.png`, `img/bezel2.png`, and `img/bezel3.png` to `<game folder>/data/img/`. Set `bezel = true` in `<game folder>/data/config` to display a bezel around the game area. The setting defaults to `false`. With `scale-mode = square-pixels`, the game loads `bezel-pixel-perfect.png`; every other scale mode uses `bezel.png`.
 
-The bezel is loaded once at startup and is shown only while the game is fullscreen and the actual renderer output is 16:9. It is automatically hidden in windowed mode, after `Alt+Enter`, when the window is manually stretched, and on non-16:9 displays. It is rendered above the game and scanline layers, using its transparent center to preserve the 4:3 image.
+The bezel is loaded once at startup and is shown only while the game is fullscreen, the actual renderer output is 16:9, and `aspect-ratio = preserve`. It is hidden by `aspect-ratio = stretch`, in windowed mode, after `Alt+Enter`, and on non-16:9 displays. It is rendered above the game and scanline layers, using its transparent center to preserve the 4:3 image.
 
 The installed image can be replaced without recompiling the project, but the game must be restarted to reload it. For predictable transparency, custom images should use an 8-bit RGBA PNG with a 16:9 resolution and a fully transparent center; `1920x1080` with a centered `1440x1080` transparent opening is recommended. A missing or invalid file is reported in `data/error.log`, and the game continues normally with black side bars. `F12` screenshots include the bezel whenever it is active. Only distribute artwork that you have permission to use.
 
 ### Optional scanlines
 
-Set `scanlines = true` in `<game folder>/data/config` to apply scanlines only to the 4:3 game image in both windowed and fullscreen modes. The setting defaults to `false`. Use `scanline-opacity` to control the effect intensity from `0` to `100`; its default value is `20`, and values outside this range are clamped and reported in `data/error.log`.
+Set `scanlines = true` in `<game folder>/data/config` to apply scanlines only to the rendered game image in both preserved 4:3 and stretched modes. The setting defaults to `false`. Use `scanline-opacity` to control the effect intensity from `0` to `100`; its default value is `20`, and values outside this range are clamped and reported in `data/error.log`.
 
 The scanline pattern is generated once at startup, follows the original 224-line game image, and is rendered in one additional blended texture operation per frame. It does not add another frame buffer, alter input processing, or perform per-frame allocations. System messages remain above the effect, the 16:9 bezel is rendered above it, and `F12` screenshots include scanlines whenever they are enabled.
 
 ### External configuration application
 
-The project includes a standalone SDL3 configuration application. On Windows, run `sf3config.exe` next to `SF3.exe` to edit every setting currently supported by `data/config`: fullscreen, window dimensions, scale mode, bezel, scanlines, scanline opacity, and player rendering above the HUD. The Windows interface uses the system Segoe UI font with antialiasing for clear, native-looking text without bundling another font or DLL.
+The project includes a standalone SDL3 configuration application. On Windows, run `sf3config.exe` next to `SF3.exe` to edit every setting currently supported by `data/config`: fullscreen, window dimensions, aspect ratio, scale mode, frame timing, bezel, scanlines, scanline opacity, and player rendering above the HUD. The Windows interface uses the system Segoe UI font with antialiasing for clear, native-looking text without bundling another font or DLL.
 
 ![3SXW Configurator in English](img/config.png)
 
@@ -85,13 +85,17 @@ The generated configuration uses these defaults:
 |---------|---------|
 | Fullscreen | `true` |
 | Window size | `640x480` |
+| Aspect ratio | `preserve` |
 | Scale mode | `nearest` |
+| Frame timing | `arcade` |
 | Bezel | `false` |
 | Scanlines | `false` |
 | Scanline opacity | `20` |
 | Players above HUD | `false` |
 
 The application preserves comments and unknown settings, validates supported values, and replaces the configuration through a temporary file only after writing succeeds. Changes take effect the next time the game starts. Its source code is under `appConfig/src/`, its intermediate build output is under `appConfig/build/`, and `cmake --install build --prefix build/application` installs it beside the game executable. Generated binaries under `appConfig/build/` are intentionally not tracked by Git.
+
+`aspect-ratio = stretch` fills the complete output with the game image; `preserve` retains the original 4:3 presentation. Selecting `stretch` automatically changes `square-pixels` to `nearest` and clears the bezel setting, because those options only apply to the preserved presentation. `frame-timing = arcade` remains the default at 59.59949 FPS, while `ps2` uses 60000/1001 FPS (approximately 59.94). `scale-mode = square-pixels` uses the corrected 300x224 presentation grid; at 1920x1080 it produces a 1200x896 game area aligned with the Capcom bezel. These settings change the full game frame cadence or presentation and require a restart.
 
 ### JPEG screenshots
 
@@ -211,7 +215,7 @@ No projeto original, arquivos de save, configuracoes e outros dados eram armazen
 | Mapeamento de teclas | `<pasta do jogo>/data/keymap` |
 | Log de erros criticos | `<pasta do jogo>/data/error.log` |
 | Capturas de tela | `<pasta do jogo>/prints/` |
-| Moldura opcional | `<pasta do jogo>/data/img/bezel.png` |
+| Molduras opcionais | `<pasta do jogo>/data/img/bezel.png` e `bezel-pixel-perfect.png` |
 | Recurso obrigatorio do jogo | `<pasta do jogo>/resources/SF33RD.AFS` |
 
 Isso torna o jogo 100% portatil: basta copiar a pasta para outro local ou computador e tudo funcionara normalmente, sem necessidade de reinstalacao. Antes de usar o armazenamento, a inicializacao tambem verifica se a pasta local `data/` pode ser criada, gravada, lida e limpa corretamente.
@@ -229,21 +233,21 @@ Isso torna o jogo 100% portatil: basta copiar a pasta para outro local ou comput
 
 ### Moldura opcional em 16:9
 
-O passo de instalacao copia a imagem `img/bezel.png` fornecida pelo projeto para `<pasta do jogo>/data/img/bezel.png`. Defina `bezel = true` em `<pasta do jogo>/data/config` para exibi-la ao redor da area 4:3 do jogo. A opcao usa `false` como valor padrao.
+O passo de instalacao copia as imagens `img/bezel.png`, `img/bezel-pixel-perfect.png`, `img/bezel2.png` e `img/bezel3.png` fornecidas pelo projeto para `<pasta do jogo>/data/img/`. Defina `bezel = true` em `<pasta do jogo>/data/config` para exibir uma moldura ao redor da area do jogo. A opcao usa `false` como valor padrao. Com `scale-mode = square-pixels`, o jogo carrega `bezel-pixel-perfect.png`; todos os demais modos usam `bezel.png`.
 
-A moldura e carregada uma vez na inicializacao e aparece somente quando o jogo esta em tela cheia e a saida real do renderer esta em 16:9. Ela desaparece automaticamente no modo janela, depois de `Alt+Enter`, quando a janela e esticada manualmente e em monitores que nao estejam em 16:9. Ela e renderizada acima das camadas do jogo e das scanlines, usando seu centro transparente para preservar a imagem 4:3.
+A moldura e carregada uma vez na inicializacao e aparece somente quando o jogo esta em tela cheia, a saida real do renderer esta em 16:9 e `aspect-ratio = preserve`. Ela desaparece com `aspect-ratio = stretch`, no modo janela, depois de `Alt+Enter` e em monitores que nao estejam em 16:9. Ela e renderizada acima das camadas do jogo e das scanlines, usando seu centro transparente para preservar a imagem 4:3.
 
 A imagem instalada pode ser substituida sem recompilar o projeto, mas o jogo precisa ser reiniciado para recarrega-la. Para garantir uma transparencia previsivel, imagens personalizadas devem usar preferencialmente um PNG RGBA de 8 bits com resolucao 16:9 e centro totalmente transparente; recomenda-se `1920x1080` com uma abertura transparente central de `1440x1080`. Arquivos ausentes ou invalidos sao informados em `data/error.log`, e o jogo continua normalmente com faixas laterais pretas. As capturas feitas com `F12` incluem a moldura quando ela estiver ativa. Distribua apenas artes que voce tenha permissao para usar.
 
 ### Scanlines opcionais
 
-Defina `scanlines = true` em `<pasta do jogo>/data/config` para aplicar scanlines somente sobre a imagem 4:3 do jogo, tanto no modo janela quanto em tela cheia. A opcao usa `false` como valor padrao. Use `scanline-opacity` para controlar a intensidade do efeito entre `0` e `100`; o valor padrao e `20`, e valores fora desse intervalo sao limitados e informados em `data/error.log`.
+Defina `scanlines = true` em `<pasta do jogo>/data/config` para aplicar scanlines somente sobre a imagem renderizada do jogo, tanto no modo 4:3 preservado quanto no esticado. A opcao usa `false` como valor padrao. Use `scanline-opacity` para controlar a intensidade do efeito entre `0` e `100`; o valor padrao e `20`, e valores fora desse intervalo sao limitados e informados em `data/error.log`.
 
 O padrao de scanlines e gerado uma unica vez na inicializacao, acompanha as 224 linhas da imagem original do jogo e usa apenas uma operacao adicional de textura com transparencia por frame. O recurso nao adiciona outro framebuffer, nao altera o processamento de input e nao realiza alocacoes a cada frame. Mensagens do sistema permanecem acima do efeito, a moldura 16:9 e renderizada acima dele e as capturas feitas com `F12` incluem as scanlines quando estiverem habilitadas.
 
 ### Aplicativo externo de configuracao
 
-O projeto inclui um aplicativo independente de configuracao feito em SDL3. No Windows, execute `sf3config.exe` ao lado de `SF3.exe` para editar todas as opcoes atualmente aceitas por `data/config`: tela cheia, dimensoes da janela, modo de escala, bezel, scanlines, intensidade das scanlines e renderizacao dos jogadores acima do HUD. A interface do Windows usa a fonte Segoe UI do sistema com antialiasing, oferecendo textos claros e com aparencia nativa sem incluir outra fonte ou DLL.
+O projeto inclui um aplicativo independente de configuracao feito em SDL3. No Windows, execute `sf3config.exe` ao lado de `SF3.exe` para editar todas as opcoes atualmente aceitas por `data/config`: tela cheia, dimensoes da janela, proporcao da tela, modo de escala, taxa de quadros, bezel, scanlines, intensidade das scanlines e renderizacao dos jogadores acima do HUD. A interface do Windows usa a fonte Segoe UI do sistema com antialiasing, oferecendo textos claros e com aparencia nativa sem incluir outra fonte ou DLL.
 
 ![Configurador 3SXW em ingles](img/config.png)
 
@@ -257,13 +261,17 @@ A configuracao criada usa estes valores padrao:
 |-------|--------------|
 | Tela cheia | `true` |
 | Tamanho da janela | `640x480` |
+| Proporcao da tela | `preserve` |
 | Modo de escala | `nearest` |
+| Taxa de quadros | `arcade` |
 | Moldura | `false` |
 | Scanlines | `false` |
 | Intensidade das scanlines | `20` |
 | Jogadores acima do HUD | `false` |
 
 O aplicativo preserva comentarios e opcoes desconhecidas, valida os valores suportados e somente substitui a configuracao por meio de um arquivo temporario depois que a gravacao termina corretamente. As mudancas entram em vigor na proxima inicializacao do jogo. O codigo-fonte fica em `appConfig/src/`, a saida intermediaria em `appConfig/build/`, e `cmake --install build --prefix build/application` instala o configurador ao lado do executavel do jogo. Os binarios gerados em `appConfig/build/` nao sao versionados pelo Git.
+
+`aspect-ratio = stretch` preenche toda a saida com a imagem do jogo; `preserve` mantem a apresentacao original em 4:3. Ao selecionar `stretch`, o configurador altera automaticamente `square-pixels` para `nearest` e desmarca a moldura, pois essas opcoes so se aplicam a apresentacao preservada. `frame-timing = arcade` continua como padrao em 59.59949 FPS, enquanto `ps2` usa 60000/1001 FPS (aproximadamente 59.94). `scale-mode = square-pixels` usa a grade de apresentacao corrigida de 300x224; em 1920x1080 ela produz uma area de jogo de 1200x896 alinhada com a moldura Capcom. Essas opcoes alteram a apresentacao ou a cadencia completa do jogo e exigem reinicializacao.
 
 ### Capturas de tela em JPEG
 

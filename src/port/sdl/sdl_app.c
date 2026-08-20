@@ -24,19 +24,23 @@ typedef enum ScaleMode {
     SCALEMODE_LINEAR,
     SCALEMODE_SOFT_LINEAR,
     SCALEMODE_SQUARE_PIXELS,
-    SCALEMODE_INTEGER,
 } ScaleMode;
 
 static const char* app_name = "Street Fighter III: 3rd Strike";
 static const float display_target_ratio = 4.0 / 3.0;
 static const int window_min_width = 384;
 static const int window_min_height = (int)(window_min_width / display_target_ratio);
-static const Uint64 target_frame_time_ns = 1000000000.0 / TARGET_FPS;
+static const double frame_rate_arcade = 59.59949;
+static const double frame_rate_ps2 = 60000.0 / 1001.0;
 
 SDL_Window* window = NULL;
 static SDL_Renderer* renderer = NULL;
 static SDL_Texture* screen_texture = NULL;
 static ScaleMode scale_mode = SCALEMODE_NEAREST;
+static bool stretch_aspect_ratio = false;
+static bool ps2_frame_timing = false;
+static double target_frame_rate = 59.59949;
+static Uint64 target_frame_time_ns = 1000000000.0 / 59.59949;
 
 static Uint64 frame_deadline = 0;
 static Uint64 frame_end_times[FRAME_END_TIMES_MAX];
@@ -72,8 +76,6 @@ static const char* scale_mode_name() {
     case SCALEMODE_SQUARE_PIXELS:
         return "square-pixels";
 
-    case SCALEMODE_INTEGER:
-        return "integer";
     }
 
     return "unknown";
@@ -87,7 +89,6 @@ static SDL_ScaleMode screen_texture_scale_mode() {
 
     case SCALEMODE_NEAREST:
     case SCALEMODE_SQUARE_PIXELS:
-    case SCALEMODE_INTEGER:
         return SDL_SCALEMODE_NEAREST;
     }
 }
@@ -159,9 +160,22 @@ static void init_scalemode() {
         scale_mode = SCALEMODE_SOFT_LINEAR;
     } else if (SDL_strcmp(raw_scalemode, "square-pixels") == 0) {
         scale_mode = SCALEMODE_SQUARE_PIXELS;
-    } else if (SDL_strcmp(raw_scalemode, "integer") == 0) {
-        scale_mode = SCALEMODE_INTEGER;
+    } else if (SDL_strcmp(raw_scalemode, "integer") == 0 || SDL_strcmp(raw_scalemode, "arcade-integer") == 0) {
+        // Compatibility with configurations created by previous releases.
+        scale_mode = SCALEMODE_SQUARE_PIXELS;
     }
+}
+
+static void init_aspect_ratio() {
+    const char* raw_aspect_ratio = Config_GetString(CFG_KEY_ASPECT_RATIO);
+    stretch_aspect_ratio = raw_aspect_ratio != NULL && SDL_strcmp(raw_aspect_ratio, "stretch") == 0;
+}
+
+static void init_frame_timing() {
+    const char* raw_frame_timing = Config_GetString(CFG_KEY_FRAME_TIMING);
+    ps2_frame_timing = raw_frame_timing != NULL && SDL_strcmp(raw_frame_timing, "ps2") == 0;
+    target_frame_rate = ps2_frame_timing ? frame_rate_ps2 : frame_rate_arcade;
+    target_frame_time_ns = (Uint64)(1000000000.0 / target_frame_rate);
 }
 
 static bool init_window() {
@@ -210,6 +224,8 @@ bool SDLApp_FullInit() {
     config_initialized = true;
     Keymap_Init();
     init_scalemode();
+    init_aspect_ratio();
+    init_frame_timing();
 
     if (!SDL_Init(SDL_INIT_GAMEPAD)) {
         SDL_Log("Couldn't initialize the SDL gamepad subsystem; keyboard input remains available: %s", SDL_GetError());
@@ -246,7 +262,8 @@ bool SDLApp_FullInit() {
     }
 
     if (Config_GetBool(CFG_KEY_BEZEL)) {
-        bezel_initialized = SDLBezel_Init(renderer);
+        const char* bezel_image = scale_mode == SCALEMODE_SQUARE_PIXELS ? "bezel-pixel-perfect.png" : "bezel.png";
+        bezel_initialized = SDLBezel_Init(renderer, bezel_image);
     }
 
     if (Config_GetBool(CFG_KEY_SCANLINES)) {
@@ -284,6 +301,11 @@ void SDLApp_WriteDebugSessionInfo() {
     SDL_GetRenderOutputSize(renderer, &output_width, &output_height);
 
     DebugLog_PrintSession("scale_mode=%s\n", scale_mode_name());
+    DebugLog_PrintSession("aspect_ratio=%s\n", stretch_aspect_ratio ? "stretch" : "preserve");
+    DebugLog_PrintSession("frame_timing=%s\n", SDLApp_GetFrameTimingName());
+    DebugLog_PrintSession("target_frame_rate=%.6f\n", SDLApp_GetTargetFrameRate());
+    DebugLog_PrintSession("target_frame_ms=%.3f\n", 1000.0 / SDLApp_GetTargetFrameRate());
+    DebugLog_PrintSession("late_frame_threshold_ms=%.3f\n", (1000.0 / SDLApp_GetTargetFrameRate()) + 1.0);
     DebugLog_PrintSession("window_width=%d\n", window_width);
     DebugLog_PrintSession("window_height=%d\n", window_height);
     DebugLog_PrintSession("render_output_width=%d\n", output_width);
@@ -435,6 +457,14 @@ bool SDLApp_HasInputFocus() {
     return has_input_focus;
 }
 
+double SDLApp_GetTargetFrameRate() {
+    return target_frame_rate;
+}
+
+const char* SDLApp_GetFrameTimingName() {
+    return ps2_frame_timing ? "ps2" : "arcade";
+}
+
 void SDLApp_BeginFrame() {
     // Clear window
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
@@ -464,38 +494,41 @@ static SDL_FRect fit_4_by_3_rect(int win_w, int win_h) {
     return rect;
 }
 
-static SDL_FRect fit_integer_rect(int win_w, int win_h, int pixel_w, int pixel_h) {
-    const int virtual_w = win_w / pixel_w;
-    const int virtual_h = win_h / pixel_h;
-    const int scale_w = virtual_w / 384;
-    const int scale_h = virtual_h / 224;
+static SDL_FRect fit_square_pixels_rect(int win_w, int win_h) {
+    /*
+     * The 384x224 CPS3 canvas is presented as 4:3 by the original game.
+     * A 300x224 presentation grid keeps that intended aspect closely while
+     * producing a 1200x896 game area at 1920x1080 for the Capcom bezel.
+     */
+    const int scale_w = win_w / 300;
+    const int scale_h = win_h / 224;
     int scale = (scale_h < scale_w) ? scale_h : scale_w;
 
-    // Better to show a cropped image than nothing at all
     if (scale < 1) {
         scale = 1;
     }
 
-    SDL_FRect rect;
-    rect.w = scale * 384 * pixel_w;
-    rect.h = scale * 224 * pixel_h;
+    SDL_FRect rect = {
+        .w = scale * 300,
+        .h = scale * 224,
+    };
     center_rect(&rect, win_w, win_h);
     return rect;
 }
 
 static SDL_FRect get_letterbox_rect(int win_w, int win_h) {
+    if (stretch_aspect_ratio) {
+        return (SDL_FRect){ .x = 0.0f, .y = 0.0f, .w = (float)win_w, .h = (float)win_h };
+    }
+
     switch (scale_mode) {
     case SCALEMODE_NEAREST:
     case SCALEMODE_LINEAR:
     case SCALEMODE_SOFT_LINEAR:
         return fit_4_by_3_rect(win_w, win_h);
 
-    case SCALEMODE_INTEGER:
-        // In order to scale a 384x224 buffer to 4:3 we need to stretch the image vertically by 9 / 7
-        return fit_integer_rect(win_w, win_h, 7, 9);
-
     case SCALEMODE_SQUARE_PIXELS:
-        return fit_integer_rect(win_w, win_h, 1, 1);
+        return fit_square_pixels_rect(win_w, win_h);
     }
 }
 
@@ -515,7 +548,7 @@ static bool output_is_16_by_9(int width, int height) {
 }
 
 static bool should_render_bezel() {
-    if (!bezel_initialized || window == NULL || renderer == NULL) {
+    if (!bezel_initialized || stretch_aspect_ratio || window == NULL || renderer == NULL) {
         return false;
     }
 

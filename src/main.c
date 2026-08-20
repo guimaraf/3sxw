@@ -583,7 +583,6 @@ static int loop() {
     bool is_running = true;
     int exit_code = 0;
     Uint64 debug_frame = 0;
-    const double late_frame_threshold_ms = (1000.0 / TARGET_FPS) + 1.0;
 
     while (is_running) {
         switch (phase) {
@@ -633,9 +632,6 @@ static int loop() {
             DebugLog_PrintSession("debug_indexed_texture_path=%d\n",
                                   configuration.debug_runtime.indexed_texture_path_enabled);
             DebugLog_PrintSession("debug_light_profile=%d\n", configuration.debug_runtime.light_profile_enabled);
-            DebugLog_PrintSession("target_frame_ms=%.3f\n", 1000.0 / TARGET_FPS);
-            DebugLog_PrintSession("late_frame_threshold_ms=%.3f\n", late_frame_threshold_ms);
-
             if (Resources_Check()) {
                 if (initialize_game()) {
                     phase = MAIN_PHASE_INITIALIZED;
@@ -740,7 +736,7 @@ static int loop() {
                 .end_ms = end_ms,
                 .game1_ms = elapsed_ms(game1_start_ns, frame_end_ns),
                 .sleep_ms = app_frame_timing.sleep_ms,
-                .late_flag = total_ms > late_frame_threshold_ms ? 1 : 0,
+                .late_flag = total_ms > ((1000.0 / SDLApp_GetTargetFrameRate()) + 1.0) ? 1 : 0,
             };
 
             DebugLog_RecordFrameTiming(&frame_timing);

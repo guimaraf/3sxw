@@ -4,7 +4,7 @@
 #include <SDL3/SDL.h>
 #include <stdbool.h>
 
-bool SDLBezel_Init(SDL_Renderer* renderer);
+bool SDLBezel_Init(SDL_Renderer* renderer, const char* image_name);
 void SDLBezel_Quit(void);
 bool SDLBezel_Render(SDL_Renderer* renderer, int target_width, int target_height);
 

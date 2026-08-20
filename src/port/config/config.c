@@ -32,6 +32,8 @@ static const ConfigEntry default_entries[] = {
     { .key = CFG_KEY_WINDOW_WIDTH, .type = CFG_INT, .value.i = 640 },
     { .key = CFG_KEY_WINDOW_HEIGHT, .type = CFG_INT, .value.i = 480 },
     { .key = CFG_KEY_SCALEMODE, .type = CFG_STRING, .value.s = "nearest" },
+    { .key = CFG_KEY_ASPECT_RATIO, .type = CFG_STRING, .value.s = "preserve" },
+    { .key = CFG_KEY_FRAME_TIMING, .type = CFG_STRING, .value.s = "arcade" },
     { .key = CFG_KEY_BEZEL, .type = CFG_BOOL, .value.b = false },
     { .key = CFG_KEY_SCANLINES, .type = CFG_BOOL, .value.b = false },
     { .key = CFG_KEY_SCANLINE_OPACITY, .type = CFG_INT, .value.i = 20 },
