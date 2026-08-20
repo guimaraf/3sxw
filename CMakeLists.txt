@@ -124,16 +124,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
     find_package(FFMPEG REQUIRED)
     find_package(MINIZIP REQUIRED)
     find_package(MbedTLS REQUIRED)
-    # libcdio via find_library or pkgconfig. vcpkg installs it as standard libraries
-    find_library(LIBCDIO_LIB cdio REQUIRED)
-    find_library(LIBISO9660_LIB iso9660 REQUIRED)
 
     target_link_libraries(SF3 PRIVATE
         SDL3::SDL3
         FFMPEG::avcodec FFMPEG::avformat FFMPEG::avutil FFMPEG::swresample
         MINIZIP::minizip
-        ${LIBCDIO_LIB}
-        ${LIBISO9660_LIB}
         MbedTLS::mbedcrypto
         ZLIB::ZLIB
         bcrypt
