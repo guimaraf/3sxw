@@ -18,7 +18,7 @@ jobs:
 
           - name: Install vcpkg dependencies
             run: |
-              vcpkg install sdl3 ffmpeg[core,swscale,swresample] minizip zlib mbedtls --triplet x64-uwp
+              vcpkg install sdl3 ffmpeg[core,swscale,swresample] minizip zlib mbedtls --triplet x64-uwp --allow-unsupported
             shell: pwsh
 
           - name: Configure CMake
