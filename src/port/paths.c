@@ -8,29 +8,21 @@ static const char* pref_path = NULL;
 
 const char* Paths_GetPrefPath() {
     if (pref_path == NULL) {
-#if defined(__WINRT__)
-        pref_path = SDL_GetPrefPath("3SX", "3SXW");
-#else
         pref_path = SDL_GetBasePath();
-#endif
     }
 
     return pref_path;
 }
 
 const char* Paths_GetBasePath() {
-#if defined(__WINRT__)
-    return Paths_GetPrefPath();
-#else
     return SDL_GetBasePath();
-#endif
 }
 
 static const char* data_path = NULL;
 
 const char* Paths_GetDataPath() {
     if (data_path == NULL) {
-        const char* base = Paths_GetBasePath();
+        const char* base = SDL_GetBasePath();
 
         if (base == NULL) {
             return NULL;
@@ -55,7 +47,7 @@ const char* Paths_GetDataPath() {
 
 bool Paths_ValidatePortableStorage(char* error, size_t error_size) {
     static const char probe_contents[] = "3SX portable storage probe";
-    const char* base_path = Paths_GetBasePath();
+    const char* base_path = SDL_GetBasePath();
 
     if (base_path == NULL) {
         SDL_snprintf(error, error_size, "Couldn't locate the game directory: %s", SDL_GetError());

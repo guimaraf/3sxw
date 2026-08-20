@@ -4,22 +4,20 @@
 #include "utils/sha256.h"
 
 #include <SDL3/SDL.h>
-#ifndef __WINRT__
 #include <cdio/iso9660.h>
-#endif
 
 #define EXPECTED_AFS_SHA "f9fa50f3a124ec9fa9465aa9c8546c2d867887eb39f711a070762a0324ba5604"
 #define ERROR_LEN_MAX 512
 #define CHUNK_SECTORS 16
 #define BUFFER_SIZE (ISO_BLOCKSIZE * CHUNK_SECTORS)
 
-#ifndef __WINRT__
 typedef enum FlowState { INIT, DIALOG_OPENED, COPY_ERROR, COPY_FATAL_ERROR, COPY_SUCCESS, COPY_CANCELED } ResourceCopyingFlowState;
 typedef enum DialogResult { DIALOG_RESULT_NONE, DIALOG_RESULT_SELECTED, DIALOG_RESULT_CANCELED, DIALOG_RESULT_ERROR } DialogResult;
 
 static ResourceCopyingFlowState flow_state = INIT;
 static SDL_Window* dialog_owner_window = NULL;
 static char error[ERROR_LEN_MAX] = { 0 };
+static const char* afs_path = NULL;
 static SDL_Mutex* dialog_result_mutex = NULL;
 static DialogResult dialog_result = DIALOG_RESULT_NONE;
 static char* selected_iso_path = NULL;
@@ -27,7 +25,6 @@ static char dialog_error[ERROR_LEN_MAX] = { 0 };
 static bool dialog_callback_pending = false;
 static bool shutdown_requested = false;
 static const SDL_DialogFileFilter iso_dialog_filter = { .name = "Game ISO", .pattern = "iso" };
-static const char* afs_path = NULL;
 
 static void create_dialog_parent_window() {
     if (dialog_owner_window != NULL) {
@@ -202,109 +199,165 @@ static bool copy_resources_from_iso(const char* iso_path) {
         current_lsn += sectors_to_read;
     }
 
-    const bool close_failed = !SDL_CloseIO(dst_io);
-
-    if (close_failed && !copy_failed) {
-        SDL_snprintf(error, ERROR_LEN_MAX, "Failed to close the resource file:\n%s\n\n%s", dst_path, SDL_GetError());
-    }
-
     iso9660_stat_free(stat);
     iso9660_close(iso);
 
-    if (copy_failed || close_failed) {
+    if (!SDL_CloseIO(dst_io)) {
+        SDL_snprintf(error, ERROR_LEN_MAX, "Failed to finish writing the resource file:\n%s\n\n%s", dst_path, SDL_GetError());
+        copy_failed = true;
+    }
+
+    if (copy_failed) {
         SDL_RemovePath(dst_path);
         return false;
     }
 
 #if CHECKSUM
-    if (!file_exists(dst_path)) {
-        SDL_snprintf(error, ERROR_LEN_MAX, "The resource file was not found after copying:\n%s", dst_path);
-        return false;
-    }
-
     char hex[SHA256_HEX_SIZE];
     sha256_finalize_hex(&sha, hex);
-    
-    if (SDL_strncmp(hex, EXPECTED_AFS_SHA, sizeof(hex)) != 0) {
-        SDL_snprintf(error, ERROR_LEN_MAX, "The resource file copied from the ISO is invalid or corrupted.");
-        SDL_RemovePath(dst_path);
-        return false;
-    }
-#endif
 
+    if (SDL_strncmp(hex, EXPECTED_AFS_SHA, sizeof(hex)) == 0) {
+        return true;
+    }
+
+    SDL_snprintf(error,
+                 ERROR_LEN_MAX,
+                 "Incorrect checksum for the copied resource:\n%s\n\nExpected %s, got %s.",
+                 dst_path,
+                 EXPECTED_AFS_SHA,
+                 hex);
+    SDL_RemovePath(dst_path);
+    return false;
+#else
     return true;
+#endif
 }
 
-static void process_dialog_result() {
+static void open_dialog() {
     if (dialog_result_mutex == NULL) {
-        return;
+        dialog_result_mutex = SDL_CreateMutex();
+
+        if (dialog_result_mutex == NULL) {
+            SDL_snprintf(error, ERROR_LEN_MAX, "Failed to initialize the ISO selection dialog:\n\n%s", SDL_GetError());
+            flow_state = COPY_FATAL_ERROR;
+            return;
+        }
     }
 
     SDL_LockMutex(dialog_result_mutex);
-
-    if (dialog_result == DIALOG_RESULT_NONE) {
-        SDL_UnlockMutex(dialog_result_mutex);
-        return;
-    }
-
-    DialogResult current_result = dialog_result;
-    char current_error[ERROR_LEN_MAX];
-    char* current_iso_path = NULL;
-
-    if (selected_iso_path != NULL) {
-        current_iso_path = SDL_strdup(selected_iso_path);
-    }
-
-    SDL_strlcpy(current_error, dialog_error, sizeof(current_error));
-
     SDL_free(selected_iso_path);
     selected_iso_path = NULL;
     dialog_result = DIALOG_RESULT_NONE;
     dialog_error[0] = '\0';
+    dialog_callback_pending = true;
+    shutdown_requested = false;
     SDL_UnlockMutex(dialog_result_mutex);
 
-    switch (current_result) {
-    case DIALOG_RESULT_SELECTED:
-        if (copy_resources_from_iso(current_iso_path)) {
-            flow_state = COPY_SUCCESS;
-        } else {
-            flow_state = COPY_ERROR;
-        }
+    flow_state = DIALOG_OPENED;
+    SDL_ShowOpenFileDialog(
+        open_file_dialog_callback, NULL, dialog_owner_window, &iso_dialog_filter, 1, NULL, false);
+}
+
+static void process_dialog_result() {
+    DialogResult result = DIALOG_RESULT_NONE;
+    char* iso_path = NULL;
+    char result_error[ERROR_LEN_MAX] = { 0 };
+
+    SDL_LockMutex(dialog_result_mutex);
+    result = dialog_result;
+
+    if (result != DIALOG_RESULT_NONE) {
+        iso_path = selected_iso_path;
+        selected_iso_path = NULL;
+        dialog_result = DIALOG_RESULT_NONE;
+        SDL_strlcpy(result_error, dialog_error, sizeof(result_error));
+        dialog_error[0] = '\0';
+    }
+
+    SDL_UnlockMutex(dialog_result_mutex);
+
+    switch (result) {
+    case DIALOG_RESULT_NONE:
         break;
 
-    case DIALOG_RESULT_ERROR:
-        SDL_strlcpy(error, current_error, sizeof(error));
-        flow_state = COPY_FATAL_ERROR;
+    case DIALOG_RESULT_SELECTED:
+        flow_state = copy_resources_from_iso(iso_path) ? COPY_SUCCESS : COPY_ERROR;
         break;
 
     case DIALOG_RESULT_CANCELED:
         flow_state = COPY_CANCELED;
         break;
 
-    case DIALOG_RESULT_NONE:
+    case DIALOG_RESULT_ERROR:
+        SDL_strlcpy(error, result_error, sizeof(error));
+        flow_state = COPY_FATAL_ERROR;
         break;
     }
 
-    SDL_free(current_iso_path);
+    SDL_free(iso_path);
 }
 
-static void open_dialog() {
-    if (dialog_result_mutex == NULL) {
-        dialog_result_mutex = SDL_CreateMutex();
+char* Resources_GetPath(const char* file_path) {
+    const char* base = Paths_GetPrefPath();
+    char* full_path = NULL;
+
+    if (file_path == NULL) {
+        SDL_asprintf(&full_path, "%sresources/", base);
+    } else {
+        SDL_asprintf(&full_path, "%sresources/%s", base, file_path);
     }
 
-    if (dialog_result_mutex == NULL) {
-        SDL_snprintf(error, sizeof(error), "Couldn't initialize the dialog state mutex:\n\n%s", SDL_GetError());
-        flow_state = COPY_FATAL_ERROR;
-        return;
+    return full_path;
+}
+
+bool Resources_Check() {
+    const char* afs_path = Resources_GetAFSPath();
+    const bool afs_present = file_exists(afs_path);
+
+    if (!afs_present) {
+        return false;
     }
 
-    SDL_LockMutex(dialog_result_mutex);
-    dialog_callback_pending = true;
-    SDL_UnlockMutex(dialog_result_mutex);
+#if CHECKSUM
+    sha256 sha;
+    sha256_init(&sha);
 
-    SDL_ShowOpenFileDialog(open_file_dialog_callback, NULL, dialog_owner_window, &iso_dialog_filter, 1, NULL, false);
-    flow_state = DIALOG_OPENED;
+    const size_t chunk_size = 10 * 1024;
+    void* buf = SDL_malloc(chunk_size);
+    SDL_IOStream* io = SDL_IOFromFile(afs_path, "rb");
+
+    if (buf == NULL || io == NULL) {
+        SDL_free(buf);
+        if (io != NULL) {
+            SDL_CloseIO(io);
+        }
+        return false;
+    }
+
+    while (true) {
+        const size_t bytes_read = SDL_ReadIO(io, buf, chunk_size);
+
+        if (bytes_read == 0) {
+            break;
+        }
+
+        sha256_append(&sha, buf, bytes_read);
+    }
+
+    SDL_free(buf);
+    const bool read_failed = SDL_GetIOStatus(io) == SDL_IO_STATUS_ERROR;
+    const bool close_failed = !SDL_CloseIO(io);
+
+    if (read_failed || close_failed) {
+        return false;
+    }
+
+    char hex[SHA256_HEX_SIZE];
+    sha256_finalize_hex(&sha, hex);
+    return SDL_strncmp(hex, EXPECTED_AFS_SHA, sizeof(hex)) == 0;
+#else
+    return true;
+#endif
 }
 
 ResourcesFlowResult Resources_RunResourceCopyingFlow() {
@@ -393,84 +446,6 @@ void Resources_Quit() {
     if (!callback_pending) {
         destroy_dialog_owner_window();
     }
-}
-#else
-ResourcesFlowResult Resources_RunResourceCopyingFlow() {
-    char canceled_message[ERROR_LEN_MAX];
-    SDL_snprintf(canceled_message,
-                 sizeof(canceled_message),
-                 "The required SF33RD.AFS file is missing:\n%s\n\nPlease transfer it to this location via Xbox Device Portal. The game will now close.",
-                 Resources_GetAFSPath());
-    SDL_ShowSimpleMessageBox(
-        SDL_MESSAGEBOX_ERROR, "Missing resource", canceled_message, NULL);
-    return RESOURCES_FLOW_EXIT_REQUESTED;
-}
-
-void Resources_Quit() {
-}
-#endif
-
-char* Resources_GetPath(const char* file_path) {
-    const char* base = Paths_GetPrefPath();
-    char* full_path = NULL;
-
-    if (file_path == NULL) {
-        SDL_asprintf(&full_path, "%sresources/", base);
-    } else {
-        SDL_asprintf(&full_path, "%sresources/%s", base, file_path);
-    }
-
-    return full_path;
-}
-
-bool Resources_Check() {
-    const char* afs_path = Resources_GetAFSPath();
-    const bool afs_present = file_exists(afs_path);
-
-    if (!afs_present) {
-        return false;
-    }
-
-#if CHECKSUM
-    sha256 sha;
-    sha256_init(&sha);
-
-    const size_t chunk_size = 10 * 1024;
-    void* buf = SDL_malloc(chunk_size);
-    SDL_IOStream* io = SDL_IOFromFile(afs_path, "rb");
-
-    if (buf == NULL || io == NULL) {
-        SDL_free(buf);
-        if (io != NULL) {
-            SDL_CloseIO(io);
-        }
-        return false;
-    }
-
-    while (true) {
-        const size_t bytes_read = SDL_ReadIO(io, buf, chunk_size);
-
-        if (bytes_read == 0) {
-            break;
-        }
-
-        sha256_append(&sha, buf, bytes_read);
-    }
-
-    SDL_free(buf);
-    const bool read_failed = SDL_GetIOStatus(io) == SDL_IO_STATUS_ERROR;
-    const bool close_failed = !SDL_CloseIO(io);
-
-    if (read_failed || close_failed) {
-        return false;
-    }
-
-    char hex[SHA256_HEX_SIZE];
-    sha256_finalize_hex(&sha, hex);
-    return SDL_strncmp(hex, EXPECTED_AFS_SHA, sizeof(hex)) == 0;
-#else
-    return true;
-#endif
 }
 
 const char* Resources_GetAFSPath() {
