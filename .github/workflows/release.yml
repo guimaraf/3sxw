@@ -170,6 +170,105 @@ jobs:
           name: build-log-windows
           path: build.log
 
+  build_uwp:
+    name: Build Xbox UWP
+    runs-on: windows-2022
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}\.vcpkg
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Checkout vcpkg
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: 80f9bcfa455e875d9c1bf7a7c6692d7e1e481061
+          path: .vcpkg
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\vcpkg-binary-cache
+          key: ${{ runner.os }}-uwp-vcpkg-${{ hashFiles('ports/uwp/vcpkg.json') }}
+
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: |
+          $binaryCache = Join-Path $env:RUNNER_TEMP "vcpkg-binary-cache"
+          New-Item -ItemType Directory -Force $binaryCache | Out-Null
+          "VCPKG_DEFAULT_BINARY_CACHE=$binaryCache" | Out-File $env:GITHUB_ENV -Append
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+
+      - name: Prepare signing certificate
+        shell: pwsh
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.XBOX_UWP_SIGNING_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.XBOX_UWP_SIGNING_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CERTIFICATE_BASE64)) {
+              throw "XBOX_UWP_SIGNING_CERTIFICATE is not configured."
+          }
+          if ([string]::IsNullOrWhiteSpace($env:CERTIFICATE_PASSWORD)) {
+              throw "XBOX_UWP_SIGNING_PASSWORD is not configured."
+          }
+
+          $pfx = Join-Path $env:RUNNER_TEMP "3sxw-uwp.pfx"
+          "UWP_PFX=$pfx" | Out-File $env:GITHUB_ENV -Append
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERTIFICATE_BASE64))
+          $flags = [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+          $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+              $pfx, $env:CERTIFICATE_PASSWORD, $flags)
+          if (-not $cert.HasPrivateKey) {
+              throw "XBOX_UWP_SIGNING_CERTIFICATE does not contain a private key."
+          }
+          if ($cert.Subject -ne "CN=3SXW") {
+              throw "The signing certificate subject must be CN=3SXW."
+          }
+
+          $cer = Join-Path $env:RUNNER_TEMP "3sxw-uwp.cer"
+          [IO.File]::WriteAllBytes(
+              $cer,
+              $cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+          Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
+          "UWP_CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Build Xbox UWP package
+        shell: pwsh
+        run: .\scripts\build\build-uwp.ps1 -Configuration Release
+
+      - name: Sign and stage Xbox UWP release
+        shell: pwsh
+        env:
+          CERTIFICATE_PASSWORD: ${{ secrets.XBOX_UWP_SIGNING_PASSWORD }}
+        run: |
+          $shortSha = "${env:GITHUB_SHA}".Substring(0, 7)
+          .\scripts\build\sign-uwp.ps1 `
+            -CertificatePath $env:UWP_PFX `
+            -CertificatePassword $env:CERTIFICATE_PASSWORD `
+            -ArchiveName "3SX-$shortSha-xbox-uwp"
+
+      - name: Upload Xbox UWP release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-uwp
+          path: dist/xbox-uwp/3SX-*-xbox-uwp.zip
+          if-no-files-found: error
+
+      - name: Remove signing certificate
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:UWP_CERT_THUMBPRINT) {
+              Remove-Item "Cert:\LocalMachine\TrustedPeople\$env:UWP_CERT_THUMBPRINT" -ErrorAction SilentlyContinue
+          }
+          if ($env:UWP_PFX) {
+              Remove-Item $env:UWP_PFX -Force -ErrorAction SilentlyContinue
+          }
+
   release:
     name: Create GitHub release
     runs-on: ubuntu-latest
@@ -177,6 +276,7 @@ jobs:
       - build_linux
       - build_macos
       - build_windows
+      - build_uwp
 
     steps:
       - name: Checkout repository

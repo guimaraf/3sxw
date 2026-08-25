@@ -2,10 +2,12 @@
 
 3SXW supports a config file which allows you to change several useful options.
 
-Config location (all platforms):
-- `<game folder>/data/config`
+Config location:
 
-> **Difference from the original project:** The upstream stored the config in OS-specific directories (e.g. `AppData\Roaming\CrowdedStreet\3SX\config` on Windows). In this fork, the config file is always kept next to the executable, making the game portable.
+- Desktop: `<game folder>/data/config`
+- Xbox UWP: `LocalState/data/config`
+
+> **Difference from the original project:** On desktop, the config file is kept next to the executable instead of an OS-specific directory such as `AppData\Roaming\CrowdedStreet\3SX\config`. Xbox UWP uses the app's LocalState storage.
 
 ## Options
 
@@ -72,10 +74,12 @@ Allow characters to render in front of the top HUD similar to Street Fighter IV.
 
 O 3SXW suporta um arquivo de configuração que permite alterar diversas opções úteis.
 
-Localização do arquivo de configuração (todas as plataformas):
-- `<pasta do jogo>/data/config`
+Localização do arquivo de configuração:
 
-> **Diferença em relação ao projeto original:** o upstream armazenava a configuração em diretórios específicos do sistema operacional (ex.: `AppData\Roaming\CrowdedStreet\3SX\config` no Windows). Neste fork, o arquivo de configuração fica sempre ao lado do executável, tornando o jogo portátil.
+- Desktop: `<pasta do jogo>/data/config`
+- Xbox UWP: `LocalState/data/config`
+
+> **Diferença em relação ao projeto original:** no desktop, o arquivo de configuração fica ao lado do executável em vez de um diretório específico do sistema, como `AppData\Roaming\CrowdedStreet\3SX\config`. O Xbox UWP usa o armazenamento LocalState do aplicativo.
 
 ## Opções
 

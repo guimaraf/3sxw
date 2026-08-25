@@ -4,10 +4,21 @@
 #include "utils/sha256.h"
 
 #include <SDL3/SDL.h>
+#if !defined(SF3_UWP)
 #include <cdio/iso9660.h>
+#endif
 
 #define EXPECTED_AFS_SHA "f9fa50f3a124ec9fa9465aa9c8546c2d867887eb39f711a070762a0324ba5604"
 #define ERROR_LEN_MAX 512
+
+static const char* afs_path = NULL;
+
+static bool file_exists(const char* path) {
+    SDL_PathInfo path_info = { 0 };
+    return SDL_GetPathInfo(path, &path_info) && path_info.type == SDL_PATHTYPE_FILE;
+}
+
+#if !defined(SF3_UWP)
 #define CHUNK_SECTORS 16
 #define BUFFER_SIZE (ISO_BLOCKSIZE * CHUNK_SECTORS)
 
@@ -17,7 +28,6 @@ typedef enum DialogResult { DIALOG_RESULT_NONE, DIALOG_RESULT_SELECTED, DIALOG_R
 static ResourceCopyingFlowState flow_state = INIT;
 static SDL_Window* dialog_owner_window = NULL;
 static char error[ERROR_LEN_MAX] = { 0 };
-static const char* afs_path = NULL;
 static SDL_Mutex* dialog_result_mutex = NULL;
 static DialogResult dialog_result = DIALOG_RESULT_NONE;
 static char* selected_iso_path = NULL;
@@ -48,11 +58,6 @@ static void destroy_dialog_owner_window() {
 
     SDL_DestroyWindow(dialog_owner_window);
     dialog_owner_window = NULL;
-}
-
-static bool file_exists(const char* path) {
-    SDL_PathInfo path_info = { 0 };
-    return SDL_GetPathInfo(path, &path_info) && path_info.type == SDL_PATHTYPE_FILE;
 }
 
 static bool create_resources_directory() {
@@ -296,6 +301,7 @@ static void process_dialog_result() {
 
     SDL_free(iso_path);
 }
+#endif
 
 char* Resources_GetPath(const char* file_path) {
     const char* base = Paths_GetPrefPath();
@@ -361,6 +367,15 @@ bool Resources_Check() {
 }
 
 ResourcesFlowResult Resources_RunResourceCopyingFlow() {
+#if defined(SF3_UWP)
+    char missing_message[ERROR_LEN_MAX];
+    SDL_snprintf(missing_message,
+                 sizeof(missing_message),
+                 "The required SF33RD.AFS file is missing:\n%s\n\nTransfer your legally obtained file to this LocalState location with Xbox Device Portal. The game will now close.",
+                 Resources_GetAFSPath());
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Missing game resource", missing_message, NULL);
+    return RESOURCES_FLOW_EXIT_REQUESTED;
+#else
     switch (flow_state) {
     case INIT:
         create_dialog_parent_window();
@@ -422,9 +437,11 @@ ResourcesFlowResult Resources_RunResourceCopyingFlow() {
     }
 
     return RESOURCES_FLOW_IN_PROGRESS;
+#endif
 }
 
 void Resources_Quit() {
+#if !defined(SF3_UWP)
     bool callback_pending = false;
 
     if (dialog_result_mutex != NULL) {
@@ -446,6 +463,7 @@ void Resources_Quit() {
     if (!callback_pending) {
         destroy_dialog_owner_window();
     }
+#endif
 }
 
 const char* Resources_GetAFSPath() {

@@ -4,8 +4,10 @@
 #if _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#if !defined(SF3_UWP)
 #include <dbghelp.h>
 #define SYMBOL_NAME_MAX 256
+#endif
 #else
 #include <execinfo.h>
 #include <signal.h>
@@ -78,8 +80,8 @@ void fatal_error(const char* fmt, ...) {
         log_f = fopen(log_path, "a");
     }
 
+#if !defined(SF3_UWP)
     void* buffer[BACKTRACE_MAX];
-
 #if !_WIN32
     int nptrs = backtrace(buffer, BACKTRACE_MAX);
     fprintf(stderr, "Stack trace:\n");
@@ -109,6 +111,7 @@ void fatal_error(const char* fmt, ...) {
     }
     free(symbol);
     SymCleanup(process);
+#endif
 #endif
 
     if (log_f) fclose(log_f);

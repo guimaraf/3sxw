@@ -1,3 +1,4 @@
 # Docs
 
-You can find documentation and other useful resources in this folder.
+Build guides are available for [Windows](buildWindows.md), [Linux](buildLinux.md),
+[macOS](buildMac.md), and [Xbox UWP](buildUWP.md).

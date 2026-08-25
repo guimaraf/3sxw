@@ -85,6 +85,12 @@ static void remove_keyboard() {
 }
 
 static void handle_gamepad_added_event(SDL_GamepadDeviceEvent* event) {
+#if defined(SF3_UWP)
+    if (input_source_index_from_joystick_id(event->which) >= 0) {
+        return;
+    }
+#endif
+
     // Remove keyboard to potentially make space for the new gamepad
     remove_keyboard();
 
@@ -240,6 +246,19 @@ static bool button_state_is_neutral(const SDLPad_ButtonState* state) {
 
 void SDLPad_Init() {
     setup_keyboard();
+
+#if defined(SF3_UWP)
+    int count = 0;
+    SDL_JoystickID* gamepads = SDL_GetGamepads(&count);
+    for (int i = 0; i < count; i++) {
+        SDL_GamepadDeviceEvent event = {
+            .type = SDL_EVENT_GAMEPAD_ADDED,
+            .which = gamepads[i],
+        };
+        handle_gamepad_added_event(&event);
+    }
+    SDL_free(gamepads);
+#endif
 }
 
 void SDLPad_Quit() {

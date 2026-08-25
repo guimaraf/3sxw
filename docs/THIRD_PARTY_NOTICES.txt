@@ -23,6 +23,7 @@ SDL3
 ----
 Project: SDL3
 Upstream: https://github.com/libsdl-org/SDL
+UWP fork: SDL3-UWP by SternXD (https://github.com/SternXD/SDL3-uwp)
 
 3SX links against:
 - SDL3
@@ -60,6 +61,19 @@ License: GNU Lesser General Public License (LGPL), version 2.1 or later, as prov
 
 Copyright:
 - Copyright (C) FFmpeg contributors.
+
+Mbed TLS
+--------
+Project: Mbed TLS
+Upstream: https://github.com/Mbed-TLS/mbedtls
+
+3SX links against:
+- Mbed TLS cryptography library
+
+License: Apache License 2.0, as provided by the Mbed TLS project.
+
+Copyright:
+- Copyright (C) Mbed TLS contributors.
 
 argparse
 ------

@@ -203,6 +203,13 @@ static bool init_window() {
     }
 
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+
+#if defined(SF3_UWP)
+    // Present once so UWP can dismiss the splash screen.
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+    SDL_RenderClear(renderer);
+    SDL_RenderPresent(renderer);
+#endif
     return true;
 }
 
@@ -219,6 +226,12 @@ bool SDLApp_PreInit() {
     return true;
 }
 
+static void init_audio() {
+    if (!SDL_Init(SDL_INIT_AUDIO)) {
+        SDL_Log("Couldn't initialize the SDL audio subsystem; the game will continue without audio: %s", SDL_GetError());
+    }
+}
+
 bool SDLApp_FullInit() {
     Config_Init();
     config_initialized = true;
@@ -226,19 +239,26 @@ bool SDLApp_FullInit() {
     init_scalemode();
     init_aspect_ratio();
     init_frame_timing();
-
+#if defined(SF3_UWP)
+    // Xbox uses SDL's Windows.Gaming.Input backend.
+    SDL_SetHint(SDL_HINT_JOYSTICK_WGI, "1");
+#endif
     if (!SDL_Init(SDL_INIT_GAMEPAD)) {
         SDL_Log("Couldn't initialize the SDL gamepad subsystem; keyboard input remains available: %s", SDL_GetError());
     }
 
-    if (!SDL_Init(SDL_INIT_AUDIO)) {
-        SDL_Log("Couldn't initialize the SDL audio subsystem; the game will continue without audio: %s", SDL_GetError());
-    }
+#if !defined(SF3_UWP)
+    init_audio();
+#endif
 
     if (!init_window()) {
         critical_error("Couldn't initialize the SDL window and renderer: %s", SDL_GetError());
         return false;
     }
+
+#if defined(SF3_UWP)
+    init_audio();
+#endif
 
     // Initialize rendering subsystems
     if (!SDLMessageRenderer_Initialize(renderer)) {

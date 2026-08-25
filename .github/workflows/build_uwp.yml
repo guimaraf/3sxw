@@ -1,0 +1,52 @@
+name: Build (Xbox UWP)
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  VCPKG_ROOT: ${{ github.workspace }}\.vcpkg
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Checkout vcpkg
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: 80f9bcfa455e875d9c1bf7a7c6692d7e1e481061
+          path: .vcpkg
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\vcpkg-binary-cache
+          key: ${{ runner.os }}-uwp-vcpkg-${{ hashFiles('ports/uwp/vcpkg.json') }}
+
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: |
+          $binaryCache = Join-Path $env:RUNNER_TEMP "vcpkg-binary-cache"
+          New-Item -ItemType Directory -Force $binaryCache | Out-Null
+          "VCPKG_DEFAULT_BINARY_CACHE=$binaryCache" | Out-File $env:GITHUB_ENV -Append
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+
+      - name: Build Xbox UWP package
+        shell: pwsh
+        run: .\scripts\build\build-uwp.ps1 -Configuration Release
+
+      - name: Upload Xbox UWP package
+        uses: actions/upload-artifact@v4
+        with:
+          name: 3SXW-Xbox-UWP
+          path: ports/uwp/build/uwp-release/AppPackages/SF3UWP
+          if-no-files-found: error

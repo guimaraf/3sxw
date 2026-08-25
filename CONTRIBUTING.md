@@ -22,7 +22,7 @@ This fork does **not** currently prioritize:
 ## Before changing code
 
 - Read the main [README.md](README.md).
-- Read the relevant build guide in [docs/buildWindows.md](docs/buildWindows.md), [docs/buildLinux.md](docs/buildLinux.md), or [docs/buildMac.md](docs/buildMac.md).
+- Read the relevant build guide in [docs/buildWindows.md](docs/buildWindows.md), [docs/buildLinux.md](docs/buildLinux.md), [docs/buildMac.md](docs/buildMac.md), or [docs/buildUWP.md](docs/buildUWP.md).
 - Understand the intent of the fork before proposing cleanups or behavior changes.
 
 ## Legal and repository safety
@@ -90,7 +90,7 @@ Este fork **nao** prioriza atualmente:
 ## Antes de alterar codigo
 
 - Leia o [README.md](README.md).
-- Leia o guia de build relevante em [docs/buildWindows.md](docs/buildWindows.md), [docs/buildLinux.md](docs/buildLinux.md) ou [docs/buildMac.md](docs/buildMac.md).
+- Leia o guia de build relevante em [docs/buildWindows.md](docs/buildWindows.md), [docs/buildLinux.md](docs/buildLinux.md), [docs/buildMac.md](docs/buildMac.md) ou [docs/buildUWP.md](docs/buildUWP.md).
 - Entenda a intencao do fork antes de propor limpezas ou mudancas de comportamento.
 
 ## Seguranca juridica e do repositorio
