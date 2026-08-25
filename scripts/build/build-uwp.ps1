@@ -1,6 +1,8 @@
 param(
     [ValidateSet("Release", "RelWithDebInfo")]
-    [string]$Configuration = "Release"
+    [string]$Configuration = "Release",
+    [ValidatePattern("^[0-9]+\.[0-9]+\.[0-9]+$")]
+    [string]$Version = "1.0.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,7 +26,7 @@ $preset = if ($Configuration -eq "Release") {
 
 Push-Location $uwpRoot
 try {
-    & cmake --preset $preset
+    & cmake --preset $preset "-DSF3_VERSION=$Version"
     if ($LASTEXITCODE -ne 0) {
         throw "CMake configuration failed."
     }

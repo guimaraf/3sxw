@@ -6,6 +6,18 @@ endif()
 
 project(SF3UWP LANGUAGES C CXX)
 
+set(SF3_VERSION "1.0.0" CACHE STRING "3SXW release version")
+if(NOT SF3_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR "SF3_VERSION must use X.Y.Z format.")
+endif()
+string(REPLACE "." ";" SF3_VERSION_PARTS "${SF3_VERSION}")
+foreach(part IN LISTS SF3_VERSION_PARTS)
+    if(part GREATER 65535)
+        message(FATAL_ERROR "MSIX version components cannot exceed 65535.")
+    endif()
+endforeach()
+set(SF3_UWP_PACKAGE_VERSION "${SF3_VERSION}.0")
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
@@ -80,7 +92,12 @@ set_target_properties(SF3GameClang PROPERTIES IMPORTED_LOCATION "${SF3_UWP_GAME_
 add_dependencies(SF3GameClang SF3GameClangBuild)
 
 set(SF3_UWP_HOST "${CMAKE_CURRENT_LIST_DIR}/compat/sdl_winrt_main.cpp")
-set(SF3_UWP_MANIFEST "${CMAKE_CURRENT_LIST_DIR}/Package.appxmanifest")
+set(SF3_UWP_MANIFEST "${CMAKE_CURRENT_BINARY_DIR}/Package.appxmanifest")
+configure_file(
+    "${CMAKE_CURRENT_LIST_DIR}/Package.appxmanifest.in"
+    "${SF3_UWP_MANIFEST}"
+    @ONLY
+)
 set(SF3_UWP_ASSETS
     "${CMAKE_CURRENT_LIST_DIR}/Assets/StoreLogo.png"
     "${CMAKE_CURRENT_LIST_DIR}/Assets/Square44x44Logo.png"

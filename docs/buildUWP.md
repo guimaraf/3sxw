@@ -56,7 +56,7 @@ The release workflow signs the MSIX with these GitHub Actions secrets:
 - `XBOX_UWP_SIGNING_PASSWORD`: the PFX password
 
 The certificate must contain its private key and use the subject `CN=3SXW`,
-matching `Package.appxmanifest`. The private certificate is used only by the
+matching the package manifest template. The private certificate is used only by the
 Windows release job. The release ZIP contains the signed MSIX, its x64 framework
 dependency, the public certificate, installation notes, and third-party notices.
 

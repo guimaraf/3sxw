@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.24)
-project(SF3 LANGUAGES C)
+
+set(SF3_VERSION "1.0.0" CACHE STRING "3SXW release version")
+if(NOT SF3_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR "SF3_VERSION must use X.Y.Z format.")
+endif()
+
+project(SF3 VERSION "${SF3_VERSION}" LANGUAGES C)
 
 # ======================================
 # Options and platform setup
@@ -306,7 +312,7 @@ install(FILES
 
 set(CPACK_PACKAGE_NAME "3SX")
 set(CPACK_PACKAGE_VENDOR "CrowdedStreet")
-# set(CPACK_PACKAGE_VERSION "1.0.0")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 
 if(WIN32)
     set(CPACK_GENERATOR "ZIP")

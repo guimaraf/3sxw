@@ -7,6 +7,9 @@ param(
     [Parameter(Mandatory)]
     [ValidatePattern("^[A-Za-z0-9._-]+$")]
     [string]$ArchiveName,
+    [Parameter(Mandatory)]
+    [ValidatePattern("^[0-9]+\.[0-9]+\.[0-9]+$")]
+    [string]$Version,
     [string]$PackageRoot,
     [string]$OutputRoot
 )
@@ -25,10 +28,9 @@ if (-not (Test-Path -LiteralPath $CertificatePath -PathType Leaf)) {
     throw "Signing certificate was not found: $CertificatePath"
 }
 
-[xml]$sourceManifest = Get-Content -Raw (Join-Path $repositoryRoot "ports/uwp/Package.appxmanifest")
-$version = $sourceManifest.Package.Identity.Version
-$packageDirectory = Join-Path $PackageRoot "SF3UWP_${version}_x64_Test"
-$package = Join-Path $packageDirectory "SF3UWP_${version}_x64.msix"
+$packageVersion = "$Version.0"
+$packageDirectory = Join-Path $PackageRoot "SF3UWP_${packageVersion}_x64_Test"
+$package = Join-Path $packageDirectory "SF3UWP_${packageVersion}_x64.msix"
 if (-not (Test-Path -LiteralPath $package -PathType Leaf)) {
     throw "Expected MSIX was not found: $package"
 }

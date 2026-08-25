@@ -3,14 +3,100 @@ name: Release
 on:
   push:
     branches: [ "main" ]
+    paths-ignore:
+      - ".github/**"
+      - "**.md"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact version to release (for example, 1.0.3). Leave blank to auto-increment."
+        required: false
+        default: ""
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  version:
+    name: Determine release version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Determine version
+        id: version
+        env:
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          semver_re='^[0-9]+\.[0-9]+\.[0-9]+$'
+
+          override="${DISPATCH_VERSION:-}"
+          if [ -z "$override" ]; then
+            message="$(git log -1 --pretty=%B || true)"
+            override="$(printf '%s' "$message" | sed -n -E 's/.*\[release[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+)\].*/\1/p' | head -1)"
+          fi
+
+          if [ -n "$override" ]; then
+            if ! printf '%s' "$override" | grep -Eq "$semver_re"; then
+              echo "::error::Invalid version '$override' (expected X.Y.Z)."
+              exit 1
+            fi
+            version="$override"
+          else
+            latest="$(git tag -l 'v*' \
+              | sed -E 's/^v//' \
+              | grep -E "$semver_re" \
+              | sort -t. -k1,1n -k2,2n -k3,3n \
+              | tail -1 || true)"
+
+            if [ -z "$latest" ]; then
+              # The existing Version 1.1 release represents 1.0.1.
+              version="1.0.2"
+            else
+              major="${latest%%.*}"
+              remainder="${latest#*.}"
+              minor="${remainder%%.*}"
+              patch="${remainder##*.}"
+              patch=$((patch + 1))
+              if [ "$patch" -gt 99 ]; then
+                minor=$((minor + 1))
+                patch=0
+              fi
+              version="${major}.${minor}.${patch}"
+            fi
+          fi
+
+          tag="v${version}"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::error::Tag $tag already exists."
+            exit 1
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::Release $tag already exists."
+            exit 1
+          fi
+
+          echo "Releasing $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
   build_linux:
     name: Build Linux
+    needs: version
     runs-on: ubuntu-latest
 
     steps:
@@ -29,7 +115,9 @@ jobs:
       - name: Build
         run: |
           set -o pipefail
-          CC=clang CXX=clang++ cmake -B build -DCMAKE_BUILD_TYPE=Release
+          CC=clang CXX=clang++ cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSF3_VERSION="${{ needs.version.outputs.version }}"
           cmake --build build --parallel 2>&1 | tee build.log
         shell: bash
 
@@ -40,8 +128,7 @@ jobs:
       - name: Package TGZ
         run: |
           set -euo pipefail
-          SHORT_SHA="${GITHUB_SHA::7}"
-          ARCHIVE_NAME="3SX-${SHORT_SHA}-linux.tar.gz"
+          ARCHIVE_NAME="3SX-${{ needs.version.outputs.version }}-linux.tar.gz"
           tar -C dist -czf "${ARCHIVE_NAME}" .
         shell: bash
 
@@ -61,6 +148,7 @@ jobs:
 
   build_macos:
     name: Build macOS
+    needs: version
     runs-on: macos-latest
 
     steps:
@@ -75,7 +163,9 @@ jobs:
       - name: Build
         run: |
           set -o pipefail
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSF3_VERSION="${{ needs.version.outputs.version }}"
           cmake --build build --parallel 2>&1 | tee build.log
         shell: bash
 
@@ -90,8 +180,7 @@ jobs:
             exit 1
           fi
 
-          SHORT_SHA="${GITHUB_SHA::7}"
-          DMG_NAME="3SX-${SHORT_SHA}-macos.dmg"
+          DMG_NAME="3SX-${{ needs.version.outputs.version }}-macos.dmg"
           mv "${DMG_PATH}" "${DMG_NAME}"
         shell: bash
 
@@ -111,6 +200,7 @@ jobs:
 
   build_windows:
     name: Build Windows
+    needs: version
     runs-on: windows-latest
 
     defaults:
@@ -141,6 +231,7 @@ jobs:
 
           CC=clang CXX=clang++ cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
+            -DSF3_VERSION="${{ needs.version.outputs.version }}" \
             -DMSYS2_LOCATION=${{ steps.msys2.outputs.msys2-location }}
 
           cmake --build build --parallel 2>&1 | tee build.log
@@ -151,8 +242,7 @@ jobs:
       - name: Package ZIP
         shell: pwsh
         run: |
-          $shortSha = "${env:GITHUB_SHA}".Substring(0, 7)
-          $archiveName = "3SX-$shortSha-windows.zip"
+          $archiveName = "3SX-${{ needs.version.outputs.version }}-windows.zip"
 
           Compress-Archive -Path "dist\*" -DestinationPath $archiveName -Force
 
@@ -172,6 +262,7 @@ jobs:
 
   build_uwp:
     name: Build Xbox UWP
+    needs: version
     runs-on: windows-2022
     env:
       VCPKG_ROOT: ${{ github.workspace }}\.vcpkg
@@ -238,18 +329,18 @@ jobs:
 
       - name: Build Xbox UWP package
         shell: pwsh
-        run: .\scripts\build\build-uwp.ps1 -Configuration Release
+        run: .\scripts\build\build-uwp.ps1 -Configuration Release -Version "${{ needs.version.outputs.version }}"
 
       - name: Sign and stage Xbox UWP release
         shell: pwsh
         env:
           CERTIFICATE_PASSWORD: ${{ secrets.XBOX_UWP_SIGNING_PASSWORD }}
         run: |
-          $shortSha = "${env:GITHUB_SHA}".Substring(0, 7)
           .\scripts\build\sign-uwp.ps1 `
             -CertificatePath $env:UWP_PFX `
             -CertificatePassword $env:CERTIFICATE_PASSWORD `
-            -ArchiveName "3SX-$shortSha-xbox-uwp"
+            -ArchiveName "3SX-${{ needs.version.outputs.version }}-xbox-uwp" `
+            -Version "${{ needs.version.outputs.version }}"
 
       - name: Upload Xbox UWP release asset
         uses: actions/upload-artifact@v4
@@ -273,6 +364,7 @@ jobs:
     name: Create GitHub release
     runs-on: ubuntu-latest
     needs:
+      - version
       - build_linux
       - build_macos
       - build_windows
@@ -291,44 +383,12 @@ jobs:
           merge-multiple: true
           path: release-assets
 
-      - name: Move rolling release tag to current commit
-        env:
-          TAG_NAME: rolling-pre-release
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -f "${TAG_NAME}" "${GITHUB_SHA}"
-          git push origin "refs/tags/${TAG_NAME}" --force
-
-      - name: Create or update GitHub release
+      - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG_NAME: rolling-pre-release
-          FULL_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          SHORT_SHA="${FULL_SHA:0:7}"
-
-          touch notes.md
-          echo "Automatic release for commit ${FULL_SHA}" >> notes.md
-          echo >> notes.md
-          echo "⚠️ **Disclaimer** ⚠️: This is a __pre-release__ build. Expect bugs and instability." >> notes.md
-
-          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
-            gh release edit "${TAG_NAME}" \
-              --title "${SHORT_SHA}" \
-              --prerelease \
-              --notes-file notes.md
-
-            for asset in $(gh release view "${TAG_NAME}" --json assets --jq '.assets[].name'); do
-              gh release delete-asset "${TAG_NAME}" "${asset}" --yes
-            done
-
-            gh release upload "${TAG_NAME}" release-assets/* --clobber
-          else
-            gh release create "${TAG_NAME}" release-assets/* \
-              --title "${SHORT_SHA}" \
-              --prerelease \
-              --notes-file notes.md
-          fi
+          gh release create "${{ needs.version.outputs.tag }}" release-assets/* \
+            --target "${GITHUB_SHA}" \
+            --title "Version ${{ needs.version.outputs.version }}" \
+            --generate-notes
