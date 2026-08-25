@@ -128,7 +128,7 @@ jobs:
       - name: Package TGZ
         run: |
           set -euo pipefail
-          ARCHIVE_NAME="3SX-${{ needs.version.outputs.version }}-linux.tar.gz"
+          ARCHIVE_NAME="3SXW-${{ needs.version.outputs.version }}-linux.tar.gz"
           tar -C dist -czf "${ARCHIVE_NAME}" .
         shell: bash
 
@@ -137,7 +137,7 @@ jobs:
         with:
           name: release-assets-linux
           path: |
-            3SX-*-linux.tar.gz
+            3SXW-*-linux.tar.gz
 
       - name: Upload Linux build log
         if: always()
@@ -180,7 +180,7 @@ jobs:
             exit 1
           fi
 
-          DMG_NAME="3SX-${{ needs.version.outputs.version }}-macos.dmg"
+          DMG_NAME="3SXW-${{ needs.version.outputs.version }}-macos.dmg"
           mv "${DMG_PATH}" "${DMG_NAME}"
         shell: bash
 
@@ -189,7 +189,7 @@ jobs:
         with:
           name: release-assets-macos
           path: |
-            3SX-*-macos.dmg
+            3SXW-*-macos.dmg
 
       - name: Upload macOS build log
         if: always()
@@ -242,7 +242,7 @@ jobs:
       - name: Package ZIP
         shell: pwsh
         run: |
-          $archiveName = "3SX-${{ needs.version.outputs.version }}-windows.zip"
+          $archiveName = "3SXW-${{ needs.version.outputs.version }}-windows.zip"
 
           Compress-Archive -Path "dist\*" -DestinationPath $archiveName -Force
 
@@ -251,7 +251,7 @@ jobs:
         with:
           name: release-assets-windows
           path: |
-            3SX-*-windows.zip
+            3SXW-*-windows.zip
 
       - name: Upload Windows build log
         if: always()
@@ -339,14 +339,14 @@ jobs:
           .\scripts\build\sign-uwp.ps1 `
             -CertificatePath $env:UWP_PFX `
             -CertificatePassword $env:CERTIFICATE_PASSWORD `
-            -ArchiveName "3SX-${{ needs.version.outputs.version }}-xbox-uwp" `
+            -ArchiveName "3SXW-${{ needs.version.outputs.version }}-xbox-uwp" `
             -Version "${{ needs.version.outputs.version }}"
 
       - name: Upload Xbox UWP release asset
         uses: actions/upload-artifact@v4
         with:
           name: release-assets-uwp
-          path: dist/xbox-uwp/3SX-*-xbox-uwp.zip
+          path: dist/xbox-uwp/3SXW-*-xbox-uwp.zip
           if-no-files-found: error
 
       - name: Remove signing certificate

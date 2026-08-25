@@ -310,7 +310,7 @@ install(FILES
 # Packaging
 # ======================================
 
-set(CPACK_PACKAGE_NAME "3SX")
+set(CPACK_PACKAGE_NAME "3SXW")
 set(CPACK_PACKAGE_VENDOR "CrowdedStreet")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 
