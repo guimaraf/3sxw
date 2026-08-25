@@ -65,13 +65,13 @@ On Xbox UWP, the bundled images are copied to `LocalState/data/img` on first lau
 
 The bezel is loaded once at startup and is shown only while the game is fullscreen, the actual renderer output is 16:9, and `aspect-ratio = preserve`. It is hidden by `aspect-ratio = stretch`, in windowed mode, after `Alt+Enter`, and on non-16:9 displays. It is rendered above the game and scanline layers, using its transparent center to preserve the 4:3 image.
 
-The installed image can be replaced without recompiling the project, but the game must be restarted to reload it. For predictable transparency, custom images should use an 8-bit RGBA PNG with a 16:9 resolution and a fully transparent center; `1920x1080` with a centered `1440x1080` transparent opening is recommended. A missing or invalid file is reported in `data/error.log`, and the game continues normally with black side bars. `F12` screenshots include the bezel whenever it is active. Only distribute artwork that you have permission to use.
+The installed image can be replaced without recompiling the project, but the game must be restarted to reload it. For predictable transparency, custom images should use an 8-bit RGBA PNG with a 16:9 resolution and a fully transparent center; `1920x1080` with a centered `1440x1080` transparent opening is recommended. A missing or invalid file is reported in `data/error.log`, and the game continues normally with black side bars. Screenshots include the bezel whenever it is active. Only distribute artwork that you have permission to use.
 
 ### Optional scanlines
 
 Set `scanlines = true` in `<game folder>/data/config` to apply scanlines only to the rendered game image in both preserved 4:3 and stretched modes. The setting defaults to `false`. Use `scanline-opacity` to control the effect intensity from `0` to `100`; its default value is `20`, and values outside this range are clamped and reported in `data/error.log`.
 
-The scanline pattern is generated once at startup, follows the original 224-line game image, and is rendered in one additional blended texture operation per frame. It does not add another frame buffer, alter input processing, or perform per-frame allocations. System messages remain above the effect, the 16:9 bezel is rendered above it, and `F12` screenshots include scanlines whenever they are enabled.
+The scanline pattern is generated once at startup, follows the original 224-line game image, and is rendered in one additional blended texture operation per frame. It does not add another frame buffer, alter input processing, or perform per-frame allocations. System messages remain above the effect, the 16:9 bezel is rendered above it, and screenshots include scanlines whenever they are enabled.
 
 ### External configuration application
 
@@ -103,7 +103,7 @@ The application preserves comments and unknown settings, validates supported val
 
 ### JPEG screenshots
 
-Press `F12` to capture the current game screen. Screenshots are stored as high-quality JPEG files under `prints/`, using names in the following format:
+Press `F12` on a keyboard or press View and Menu together on a gamepad to capture the current game screen. Screenshots are stored as high-quality JPEG files under `prints/` (`LocalState/prints` in the UWP package), using names in the following format:
 
 ```text
 sf3_YYYY-MM-DD_HH-MM-SS-mmm.jpg
@@ -245,13 +245,13 @@ No Xbox UWP, as imagens fornecidas sao copiadas para `LocalState/data/img` na pr
 
 A moldura e carregada uma vez na inicializacao e aparece somente quando o jogo esta em tela cheia, a saida real do renderer esta em 16:9 e `aspect-ratio = preserve`. Ela desaparece com `aspect-ratio = stretch`, no modo janela, depois de `Alt+Enter` e em monitores que nao estejam em 16:9. Ela e renderizada acima das camadas do jogo e das scanlines, usando seu centro transparente para preservar a imagem 4:3.
 
-A imagem instalada pode ser substituida sem recompilar o projeto, mas o jogo precisa ser reiniciado para recarrega-la. Para garantir uma transparencia previsivel, imagens personalizadas devem usar preferencialmente um PNG RGBA de 8 bits com resolucao 16:9 e centro totalmente transparente; recomenda-se `1920x1080` com uma abertura transparente central de `1440x1080`. Arquivos ausentes ou invalidos sao informados em `data/error.log`, e o jogo continua normalmente com faixas laterais pretas. As capturas feitas com `F12` incluem a moldura quando ela estiver ativa. Distribua apenas artes que voce tenha permissao para usar.
+A imagem instalada pode ser substituida sem recompilar o projeto, mas o jogo precisa ser reiniciado para recarrega-la. Para garantir uma transparencia previsivel, imagens personalizadas devem usar preferencialmente um PNG RGBA de 8 bits com resolucao 16:9 e centro totalmente transparente; recomenda-se `1920x1080` com uma abertura transparente central de `1440x1080`. Arquivos ausentes ou invalidos sao informados em `data/error.log`, e o jogo continua normalmente com faixas laterais pretas. As capturas incluem a moldura quando ela estiver ativa. Distribua apenas artes que voce tenha permissao para usar.
 
 ### Scanlines opcionais
 
 Defina `scanlines = true` em `<pasta do jogo>/data/config` para aplicar scanlines somente sobre a imagem renderizada do jogo, tanto no modo 4:3 preservado quanto no esticado. A opcao usa `false` como valor padrao. Use `scanline-opacity` para controlar a intensidade do efeito entre `0` e `100`; o valor padrao e `20`, e valores fora desse intervalo sao limitados e informados em `data/error.log`.
 
-O padrao de scanlines e gerado uma unica vez na inicializacao, acompanha as 224 linhas da imagem original do jogo e usa apenas uma operacao adicional de textura com transparencia por frame. O recurso nao adiciona outro framebuffer, nao altera o processamento de input e nao realiza alocacoes a cada frame. Mensagens do sistema permanecem acima do efeito, a moldura 16:9 e renderizada acima dele e as capturas feitas com `F12` incluem as scanlines quando estiverem habilitadas.
+O padrao de scanlines e gerado uma unica vez na inicializacao, acompanha as 224 linhas da imagem original do jogo e usa apenas uma operacao adicional de textura com transparencia por frame. O recurso nao adiciona outro framebuffer, nao altera o processamento de input e nao realiza alocacoes a cada frame. Mensagens do sistema permanecem acima do efeito, a moldura 16:9 e renderizada acima dele e as capturas incluem as scanlines quando estiverem habilitadas.
 
 ### Aplicativo externo de configuracao
 
@@ -283,7 +283,7 @@ O aplicativo preserva comentarios e opcoes desconhecidas, valida os valores supo
 
 ### Capturas de tela em JPEG
 
-Pressione `F12` para capturar a tela atual do jogo. As imagens sao armazenadas como arquivos JPEG de alta qualidade dentro de `prints/`, usando nomes no seguinte formato:
+Pressione `F12` no teclado ou pressione View e Menu ao mesmo tempo no controle para capturar a tela atual do jogo. As imagens sao armazenadas como arquivos JPEG de alta qualidade dentro de `prints/` (`LocalState/prints` no pacote UWP), usando nomes no seguinte formato:
 
 ```text
 sf3_YYYY-MM-DD_HH-MM-SS-mmm.jpg

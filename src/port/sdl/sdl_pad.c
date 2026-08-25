@@ -29,6 +29,8 @@ static int keyboard_index = -1;
 static bool input_enabled = true;
 static bool wait_for_neutral[INPUT_SOURCES_MAX] = { false };
 static bool suppressed_scancodes[SDL_SCANCODE_COUNT] = { false };
+static bool screenshot_chord_active[INPUT_SOURCES_MAX] = { false };
+static bool screenshot_requested = false;
 
 static int input_source_index_from_joystick_id(SDL_JoystickID id) {
     for (int i = 0; i < INPUT_SOURCES_MAX; i++) {
@@ -137,6 +139,7 @@ static void handle_gamepad_removed_event(SDL_GamepadDeviceEvent* event) {
     input_source->type = SDLPAD_INPUT_NONE;
     input_source->gamepad.gamepad = NULL;
     wait_for_neutral[index] = true;
+    screenshot_chord_active[index] = false;
     connected_input_sources -= 1;
 
     // Setup keyboard in the newly freed slot
@@ -244,6 +247,22 @@ static bool button_state_is_neutral(const SDLPad_ButtonState* state) {
            stick_is_neutral(state->right_stick_x, state->right_stick_y);
 }
 
+static void handle_screenshot_chord(int id, SDLPad_ButtonState* state) {
+    const bool back = state->back;
+    const bool start = state->start;
+
+    if (!screenshot_chord_active[id] && back && start) {
+        screenshot_chord_active[id] = true;
+        screenshot_requested = true;
+    }
+
+    if (screenshot_chord_active[id]) {
+        state->back = false;
+        state->start = false;
+        screenshot_chord_active[id] = back || start;
+    }
+}
+
 void SDLPad_Init() {
     setup_keyboard();
 
@@ -273,9 +292,11 @@ void SDLPad_Quit() {
     SDL_zeroa(input_sources);
     SDL_zeroa(wait_for_neutral);
     SDL_zeroa(suppressed_scancodes);
+    SDL_zeroa(screenshot_chord_active);
     connected_input_sources = 0;
     keyboard_index = -1;
     input_enabled = true;
+    screenshot_requested = false;
 }
 
 void SDLPad_SetInputEnabled(bool enabled) {
@@ -330,10 +351,19 @@ void SDLPad_GetButtonState(int id, SDLPad_ButtonState* state) {
     if (!input_enabled || wait_for_neutral[id]) {
         if (input_enabled && button_state_is_neutral(state)) {
             wait_for_neutral[id] = false;
+            screenshot_chord_active[id] = false;
         }
 
         SDL_zerop(state);
+    } else if (id != keyboard_index) {
+        handle_screenshot_chord(id, state);
     }
+}
+
+bool SDLPad_TakeScreenshotRequested() {
+    const bool requested = screenshot_requested;
+    screenshot_requested = false;
+    return requested;
 }
 
 void SDLPad_RumblePad(int id, bool low_freq_enabled, Uint8 high_freq_rumble) {

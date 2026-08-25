@@ -27,6 +27,7 @@ target_include_directories(sf3_game PRIVATE
 )
 target_compile_definitions(sf3_game PRIVATE
     SF3_UWP=1
+    WINAPI_FAMILY=WINAPI_FAMILY_APP
     main=SF3_Main
     _CRT_SECURE_NO_WARNINGS
     $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:RELEASE>

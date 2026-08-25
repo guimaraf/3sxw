@@ -650,6 +650,10 @@ void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
         SDL_zero(*timing);
     }
 
+    if (SDLPad_TakeScreenshotRequested()) {
+        should_save_screenshot = true;
+    }
+
     // Run sound processing
     const Uint64 adx_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
     ADX_ProcessTracks();

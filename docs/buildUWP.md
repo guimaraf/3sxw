@@ -69,7 +69,8 @@ obtained `SF33RD.AFS` through Xbox Device Portal to:
 LocalState/resources/SF33RD.AFS
 ```
 
-Configuration, saves, logs, and screenshots are written under `LocalState/data`.
+Configuration, saves, and logs are written under `LocalState/data`. Press View
+and Menu together to save screenshots under `LocalState/prints`.
 On first launch, the bundled bezels are copied to `LocalState/data/img`. Existing
 files in that folder are left unchanged.
 Runtime code remains in the installed package.
