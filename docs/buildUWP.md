@@ -70,6 +70,8 @@ LocalState/resources/SF33RD.AFS
 ```
 
 Configuration, saves, logs, and screenshots are written under `LocalState/data`.
+On first launch, the bundled bezels are copied to `LocalState/data/img`. Existing
+files in that folder are left unchanged.
 Runtime code remains in the installed package.
 
 ## Xbox deployment

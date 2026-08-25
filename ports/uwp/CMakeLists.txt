@@ -107,12 +107,19 @@ set(SF3_UWP_ASSETS
     "${CMAKE_CURRENT_LIST_DIR}/Assets/WideTile.png"
     "${CMAKE_CURRENT_LIST_DIR}/Assets/SplashScreen.png"
 )
+set(SF3_UWP_BEZELS
+    "${SF3_ROOT}/img/bezel.png"
+    "${SF3_ROOT}/img/bezel-pixel-perfect.png"
+    "${SF3_ROOT}/img/bezel2.png"
+    "${SF3_ROOT}/img/bezel3.png"
+)
 
 add_executable(SF3UWP WIN32
     "${SF3_UWP_HOST}"
     "${SF3_UWP_SDL_MAIN_RC}"
     "${SF3_UWP_MANIFEST}"
     ${SF3_UWP_ASSETS}
+    ${SF3_UWP_BEZELS}
 )
 
 set_source_files_properties("${SF3_UWP_HOST}" PROPERTIES COMPILE_OPTIONS "/ZW")
@@ -126,6 +133,11 @@ set_source_files_properties(${SF3_UWP_ASSETS} PROPERTIES
     VS_COPY_TO_OUT_DIR Always
     VS_DEPLOYMENT_CONTENT TRUE
     VS_DEPLOYMENT_LOCATION "Assets"
+)
+set_source_files_properties(${SF3_UWP_BEZELS} PROPERTIES
+    VS_COPY_TO_OUT_DIR Always
+    VS_DEPLOYMENT_CONTENT TRUE
+    VS_DEPLOYMENT_LOCATION "data/img"
 )
 
 target_link_directories(SF3UWP PRIVATE "${SF3_UWP_VCPKG_PREFIX}/lib")

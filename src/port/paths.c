@@ -28,6 +28,49 @@ const char* Paths_GetBasePath() {
 
 static const char* data_path = NULL;
 
+#if defined(SF3_UWP)
+static void install_bundled_bezels(const char* destination_root) {
+    static const char* bezel_files[] = {
+        "bezel.png",
+        "bezel-pixel-perfect.png",
+        "bezel2.png",
+        "bezel3.png",
+    };
+    const char* package_root = SDL_GetBasePath();
+    char* destination_dir = NULL;
+
+    if (package_root == NULL || SDL_asprintf(&destination_dir, "%simg/", destination_root) < 0 ||
+        destination_dir == NULL) {
+        SDL_Log("Couldn't locate the bundled bezel images: %s", SDL_GetError());
+        SDL_free(destination_dir);
+        return;
+    }
+
+    if (!SDL_CreateDirectory(destination_dir)) {
+        SDL_Log("Couldn't create the bezel directory %s: %s", destination_dir, SDL_GetError());
+        SDL_free(destination_dir);
+        return;
+    }
+
+    for (size_t i = 0; i < SDL_arraysize(bezel_files); i++) {
+        char* source = NULL;
+        char* destination = NULL;
+
+        if (SDL_asprintf(&source, "%sdata/img/%s", package_root, bezel_files[i]) < 0 || source == NULL ||
+            SDL_asprintf(&destination, "%s%s", destination_dir, bezel_files[i]) < 0 || destination == NULL) {
+            SDL_Log("Couldn't allocate a bezel image path: %s", SDL_GetError());
+        } else if (!SDL_GetPathInfo(destination, NULL) && !SDL_CopyFile(source, destination)) {
+            SDL_Log("Couldn't install the bundled bezel %s: %s", bezel_files[i], SDL_GetError());
+        }
+
+        SDL_free(source);
+        SDL_free(destination);
+    }
+
+    SDL_free(destination_dir);
+}
+#endif
+
 const char* Paths_GetDataPath() {
     if (data_path == NULL) {
         const char* base = Paths_GetBasePath();
@@ -46,6 +89,10 @@ const char* Paths_GetDataPath() {
             SDL_free(full_path);
             return NULL;
         }
+
+#if defined(SF3_UWP)
+        install_bundled_bezels(full_path);
+#endif
 
         data_path = full_path;
     }

@@ -61,6 +61,8 @@ The Xbox UWP build stores writable files in the app's LocalState directory.
 
 The installation step copies the bundled `img/bezel.png`, `img/bezel-pixel-perfect.png`, `img/bezel2.png`, and `img/bezel3.png` to `<game folder>/data/img/`. Set `bezel = true` in `<game folder>/data/config` to display a bezel around the game area. The setting defaults to `false`. With `scale-mode = square-pixels`, the game loads `bezel-pixel-perfect.png`; every other scale mode uses `bezel.png`.
 
+On Xbox UWP, the bundled images are copied to `LocalState/data/img` on first launch. Existing files are left unchanged.
+
 The bezel is loaded once at startup and is shown only while the game is fullscreen, the actual renderer output is 16:9, and `aspect-ratio = preserve`. It is hidden by `aspect-ratio = stretch`, in windowed mode, after `Alt+Enter`, and on non-16:9 displays. It is rendered above the game and scanline layers, using its transparent center to preserve the 4:3 image.
 
 The installed image can be replaced without recompiling the project, but the game must be restarted to reload it. For predictable transparency, custom images should use an 8-bit RGBA PNG with a 16:9 resolution and a fully transparent center; `1920x1080` with a centered `1440x1080` transparent opening is recommended. A missing or invalid file is reported in `data/error.log`, and the game continues normally with black side bars. `F12` screenshots include the bezel whenever it is active. Only distribute artwork that you have permission to use.
@@ -238,6 +240,8 @@ O build Xbox UWP armazena os arquivos gravaveis no diretorio LocalState do aplic
 ### Moldura opcional em 16:9
 
 O passo de instalacao copia as imagens `img/bezel.png`, `img/bezel-pixel-perfect.png`, `img/bezel2.png` e `img/bezel3.png` fornecidas pelo projeto para `<pasta do jogo>/data/img/`. Defina `bezel = true` em `<pasta do jogo>/data/config` para exibir uma moldura ao redor da area do jogo. A opcao usa `false` como valor padrao. Com `scale-mode = square-pixels`, o jogo carrega `bezel-pixel-perfect.png`; todos os demais modos usam `bezel.png`.
+
+No Xbox UWP, as imagens fornecidas sao copiadas para `LocalState/data/img` na primeira inicializacao. Os arquivos existentes nao sao substituidos.
 
 A moldura e carregada uma vez na inicializacao e aparece somente quando o jogo esta em tela cheia, a saida real do renderer esta em 16:9 e `aspect-ratio = preserve`. Ela desaparece com `aspect-ratio = stretch`, no modo janela, depois de `Alt+Enter` e em monitores que nao estejam em 16:9. Ela e renderizada acima das camadas do jogo e das scanlines, usando seu centro transparente para preservar a imagem 4:3.
 
