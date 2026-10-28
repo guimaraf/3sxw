@@ -218,30 +218,75 @@ elseif(WIN32)
         get_filename_component(binPath "${CMAKE_C_COMPILER}" DIRECTORY)
     endif()
 
-    file(GLOB FFMPEG_DLLS "${FFMPEG_ROOT}/bin/*.dll")
-    file(GLOB SDL3_DLLS "${SDL3_ROOT}/bin/*.dll")
-
-    # Explicit copies are more reliable than runtime dependency discovery on MSYS2 CI.
-    set(WINDOWS_RUNTIME_DLLS
-        "${binPath}/libgcc_s_seh-1.dll"
-        "${binPath}/libiconv-2.dll"
-        "${binPath}/libwinpthread-1.dll"
-        "${binPath}/zlib1.dll"
-    )
-
-    set(WINDOWS_PACKAGE_DLLS ${FFMPEG_DLLS} ${SDL3_DLLS})
-    foreach(runtime_dll IN LISTS WINDOWS_RUNTIME_DLLS)
-        if(EXISTS "${runtime_dll}")
-            list(APPEND WINDOWS_PACKAGE_DLLS "${runtime_dll}")
-        endif()
-    endforeach()
-
-    if(WINDOWS_PACKAGE_DLLS)
-        install(FILES
-            ${WINDOWS_PACKAGE_DLLS}
-            DESTINATION bin
-        )
+    # Inspect the actual PE imports, including dependencies of dependencies.
+    # Raw .dll.a link paths do not populate TARGET_RUNTIME_DLLS reliably.
+    if(NOT CMAKE_OBJDUMP)
+        find_program(CMAKE_OBJDUMP NAMES objdump llvm-objdump HINTS "${binPath}" REQUIRED)
     endif()
+    if(NOT EXISTS "${CMAKE_OBJDUMP}")
+        message(FATAL_ERROR "A PE inspection tool (CMAKE_OBJDUMP) is required to package Windows DLLs.")
+    endif()
+
+    set(WINDOWS_DEPENDENCY_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/windows-runtime-dependencies.cmake")
+    file(CONFIGURE OUTPUT "${WINDOWS_DEPENDENCY_SCRIPT}" CONTENT [=[
+set(CMAKE_GET_RUNTIME_DEPENDENCIES_PLATFORM "windows+pe")
+set(CMAKE_GET_RUNTIME_DEPENDENCIES_TOOL "objdump")
+set(CMAKE_GET_RUNTIME_DEPENDENCIES_COMMAND "@CMAKE_OBJDUMP@")
+
+if(NOT DEFINED runtime_executable OR NOT EXISTS "${runtime_executable}")
+    message(FATAL_ERROR "Windows executable does not exist: ${runtime_executable}")
+endif()
+
+file(GET_RUNTIME_DEPENDENCIES
+    EXECUTABLES "${runtime_executable}"
+    DIRECTORIES "@FFMPEG_ROOT@/bin" "@SDL3_ROOT@/bin" "@binPath@"
+    RESOLVED_DEPENDENCIES_VAR resolved_dlls
+    UNRESOLVED_DEPENDENCIES_VAR unresolved_dlls
+    CONFLICTING_DEPENDENCIES_PREFIX conflicting_dlls
+    PRE_EXCLUDE_REGEXES "^[Aa][Pp][Ii]-[Mm][Ss]-" "^[Ee][Xx][Tt]-[Mm][Ss]-"
+    POST_EXCLUDE_REGEXES ".*[/\\][Ss][Yy][Ss][Tt][Ee][Mm]32[/\\].*"
+)
+
+if(unresolved_dlls OR conflicting_dlls_FILENAMES)
+    message(FATAL_ERROR
+        "Cannot package ${runtime_executable}. Missing DLLs: ${unresolved_dlls}; conflicting DLLs: ${conflicting_dlls_FILENAMES}")
+endif()
+
+foreach(runtime_dll IN LISTS resolved_dlls)
+    message(STATUS "Windows runtime dependency: ${runtime_dll}")
+    if(DEFINED runtime_destination)
+        file(MAKE_DIRECTORY "${runtime_destination}")
+        get_filename_component(runtime_source_dir "${runtime_dll}" DIRECTORY)
+        file(REAL_PATH "${runtime_source_dir}" runtime_source_dir)
+        file(REAL_PATH "${runtime_destination}" runtime_destination_dir)
+        if(NOT runtime_source_dir STREQUAL runtime_destination_dir)
+            get_filename_component(runtime_filename "${runtime_dll}" NAME)
+            file(COPY_FILE "${runtime_dll}" "${runtime_destination}/${runtime_filename}" ONLY_IF_DIFFERENT)
+        endif()
+    endif()
+endforeach()
+]=] @ONLY)
+
+    foreach(runtime_target IN ITEMS SF3 SF3Config)
+        add_custom_target(${runtime_target}RuntimeDLLs ALL
+            COMMAND "${CMAKE_COMMAND}"
+                "-Druntime_executable=$<TARGET_FILE:${runtime_target}>"
+                "-Druntime_destination=$<TARGET_FILE_DIR:${runtime_target}>"
+                -P "${WINDOWS_DEPENDENCY_SCRIPT}"
+            COMMENT "Copying Windows runtime DLLs for ${runtime_target}"
+            DEPENDS ${runtime_target}
+            VERBATIM
+        )
+        install(CODE "
+            execute_process(
+                COMMAND \"${CMAKE_COMMAND}\"
+                    \"-Druntime_executable=$<TARGET_FILE:${runtime_target}>\"
+                    \"-Druntime_destination=\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/bin\"
+                    -P \"${WINDOWS_DEPENDENCY_SCRIPT}\"
+                COMMAND_ERROR_IS_FATAL ANY
+            )
+        ")
+    endforeach()
 
     install(FILES
         "$<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${CMAKE_CURRENT_BINARY_DIR}/SF3.pdb>"
@@ -271,10 +316,11 @@ elseif(UNIX)
     )
 endif()
 
-set(BEZEL_IMAGE_FILE "${CMAKE_SOURCE_DIR}/img/bezel.png")
-set(PIXEL_PERFECT_BEZEL_IMAGE_FILE "${CMAKE_SOURCE_DIR}/img/bezel-pixel-perfect.png")
-set(BEZEL_2_IMAGE_FILE "${CMAKE_SOURCE_DIR}/img/bezel2.png")
-set(BEZEL_3_IMAGE_FILE "${CMAKE_SOURCE_DIR}/img/bezel3.png")
+set(BEZEL_SOURCE_DIR "${CMAKE_SOURCE_DIR}/img/16-9")
+set(BEZEL_IMAGE_FILE "${BEZEL_SOURCE_DIR}/bezel.png")
+set(PIXEL_PERFECT_BEZEL_IMAGE_FILE "${BEZEL_SOURCE_DIR}/bezel-pixel-perfect.png")
+set(BEZEL_2_IMAGE_FILE "${BEZEL_SOURCE_DIR}/bezel2.png")
+set(BEZEL_3_IMAGE_FILE "${BEZEL_SOURCE_DIR}/bezel3.png")
 
 foreach(REQUIRED_BEZEL_IMAGE_FILE IN ITEMS
         "${BEZEL_IMAGE_FILE}"
@@ -306,7 +352,7 @@ install(FILES
 
 set(CPACK_PACKAGE_NAME "3SX")
 set(CPACK_PACKAGE_VENDOR "CrowdedStreet")
-# set(CPACK_PACKAGE_VERSION "1.0.0")
+set(CPACK_PACKAGE_VERSION "1.1.1")
 
 if(WIN32)
     set(CPACK_GENERATOR "ZIP")

@@ -398,6 +398,15 @@ void SPU_Quit() {
 }
 
 void SPU_Upload(u32 dst, void* src, u32 size) {
+    if (src == NULL || size == 0) {
+        return;
+    }
+
+    if ((size_t)dst + size > sizeof(ram)) {
+        log_error("SPU_Upload out of bounds: dst=0x%x, size=%u, max=%zu", dst, size, sizeof(ram));
+        return;
+    }
+
     const bool record_timing = DebugLog_IsEnabled();
     const Uint64 start_ns = record_timing ? SDL_GetTicksNS() : 0;
 

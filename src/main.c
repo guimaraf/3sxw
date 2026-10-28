@@ -216,6 +216,7 @@ static void cleanup() {
     Resources_Quit();
     SDLApp_Quit();
     SingleInstance_Release();
+    Paths_Quit();
 }
 
 // Iteration

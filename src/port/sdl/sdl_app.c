@@ -202,6 +202,10 @@ static bool init_window() {
         return false;
     }
 
+    if (!SDL_SetRenderVSync(renderer, 0)) {
+        SDL_Log("Failed to disable renderer VSync: %s", SDL_GetError());
+    }
+
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     return true;
 }

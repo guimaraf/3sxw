@@ -34,6 +34,7 @@
 #include "sf33rd/Source/Game/system/sysdir.h"
 #include "sf33rd/Source/Game/system/work_sys.h"
 #include "sf33rd/Source/Game/ui/sc_sub.h"
+#include "port/utils.h"
 #include <memory.h>
 
 u8 Candidate_Buff[16];
@@ -1002,7 +1003,7 @@ bool Cut_Cut_Loser() {
 }
 
 void njWaitVSync_with_N() {
-    while (1) {}
+    fatal_error("njWaitVSync_with_N invoked unexpectedly: unrecoverable hardware sync state");
 }
 
 void Soft_Reset_Sub() {

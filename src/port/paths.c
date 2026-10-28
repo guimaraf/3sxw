@@ -4,25 +4,24 @@
 
 #include <string.h>
 
-static const char* pref_path = NULL;
-
-const char* Paths_GetPrefPath() {
-    if (pref_path == NULL) {
-        pref_path = SDL_GetBasePath();
-    }
-
-    return pref_path;
-}
+static char* base_path = NULL;
+static char* data_path = NULL;
 
 const char* Paths_GetBasePath() {
-    return SDL_GetBasePath();
+    if (base_path == NULL) {
+        base_path = SDL_GetBasePath();
+    }
+
+    return base_path;
 }
 
-static const char* data_path = NULL;
+const char* Paths_GetPrefPath() {
+    return Paths_GetBasePath();
+}
 
 const char* Paths_GetDataPath() {
     if (data_path == NULL) {
-        const char* base = SDL_GetBasePath();
+        const char* base = Paths_GetBasePath();
 
         if (base == NULL) {
             return NULL;
@@ -45,11 +44,23 @@ const char* Paths_GetDataPath() {
     return data_path;
 }
 
+void Paths_Quit(void) {
+    if (data_path != NULL) {
+        SDL_free(data_path);
+        data_path = NULL;
+    }
+
+    if (base_path != NULL) {
+        SDL_free(base_path);
+        base_path = NULL;
+    }
+}
+
 bool Paths_ValidatePortableStorage(char* error, size_t error_size) {
     static const char probe_contents[] = "3SX portable storage probe";
-    const char* base_path = SDL_GetBasePath();
+    const char* base_dir = Paths_GetBasePath();
 
-    if (base_path == NULL) {
+    if (base_dir == NULL) {
         SDL_snprintf(error, error_size, "Couldn't locate the game directory: %s", SDL_GetError());
         return false;
     }
@@ -60,7 +71,7 @@ bool Paths_ValidatePortableStorage(char* error, size_t error_size) {
         SDL_snprintf(error,
                      error_size,
                      "Couldn't create the portable data directory:\n%sdata/\n\n%s",
-                     base_path,
+                     base_dir,
                      SDL_GetError());
         return false;
     }

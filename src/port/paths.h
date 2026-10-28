@@ -17,4 +17,7 @@ const char* Paths_GetDataPath();
 /// Validate that the portable data directory supports create, write, read and delete operations.
 bool Paths_ValidatePortableStorage(char* error, size_t error_size);
 
+/// Free cached path strings on shutdown.
+void Paths_Quit(void);
+
 #endif
