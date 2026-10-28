@@ -46,8 +46,10 @@ static Uint64 frame_deadline = 0;
 static Uint64 frame_end_times[FRAME_END_TIMES_MAX];
 static int frame_end_times_index = 0;
 static bool frame_end_times_filled = false;
+#if DEBUG
 static double fps = 0;
 static Uint64 frame_counter = 0;
+#endif
 
 static bool should_save_screenshot = false;
 static bool pause_requested = false;
@@ -580,6 +582,7 @@ static void note_frame_end_time() {
     }
 }
 
+#if DEBUG
 static void update_fps() {
     if (!frame_end_times_filled) {
         return;
@@ -596,6 +599,7 @@ static void update_fps() {
     double average_frame_time_ms = total_frame_time_ms / (FRAME_END_TIMES_MAX - 1);
     fps = 1000 / average_frame_time_ms;
 }
+#endif
 
 static bool queue_texture_screenshot(SDL_Texture* texture) {
     SDL_Texture* previous_target = SDL_GetRenderTarget(renderer);
@@ -763,9 +767,13 @@ void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
     }
 
     // Measure
+#if DEBUG
     frame_counter += 1;
+#endif
     note_frame_end_time();
+#if DEBUG
     update_fps();
+#endif
     if (timing != NULL) {
         timing->pacing_ms = (double)(SDL_GetTicksNS() - pacing_start_ns) / 1e6;
         timing->pacing_overhead_ms = timing->pacing_ms - timing->sleep_ms;
