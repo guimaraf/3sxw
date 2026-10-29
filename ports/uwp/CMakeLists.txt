@@ -108,10 +108,10 @@ set(SF3_UWP_ASSETS
     "${CMAKE_CURRENT_LIST_DIR}/Assets/SplashScreen.png"
 )
 set(SF3_UWP_BEZELS
-    "${SF3_ROOT}/img/bezel.png"
-    "${SF3_ROOT}/img/bezel-pixel-perfect.png"
-    "${SF3_ROOT}/img/bezel2.png"
-    "${SF3_ROOT}/img/bezel3.png"
+    "${SF3_ROOT}/img/16-9/bezel.png"
+    "${SF3_ROOT}/img/16-9/bezel-pixel-perfect.png"
+    "${SF3_ROOT}/img/16-9/bezel2.png"
+    "${SF3_ROOT}/img/16-9/bezel3.png"
 )
 
 set(SF3_UWP_NOTICES
