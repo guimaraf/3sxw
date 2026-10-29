@@ -212,11 +212,18 @@ elseif(WIN32)
         RUNTIME DESTINATION bin
     )
 
+    # The compiler path is resolved by CMake and belongs to the active toolchain.
+    # MSYS2_LOCATION passed through a shell may contain altered backslashes.
+    get_filename_component(binPath "${CMAKE_C_COMPILER}" DIRECTORY)
+    set(WINDOWS_RUNTIME_SEARCH_DIRS
+        "${FFMPEG_ROOT}/bin" "${SDL3_ROOT}/bin" "${binPath}")
     if(DEFINED MSYS2_LOCATION AND NOT MSYS2_LOCATION STREQUAL "")
-        file(TO_CMAKE_PATH "${MSYS2_LOCATION}/mingw64/bin" binPath)
-    else()
-        get_filename_component(binPath "${CMAKE_C_COMPILER}" DIRECTORY)
+        file(TO_CMAKE_PATH "${MSYS2_LOCATION}/mingw64/bin" msys2_bin_path)
+        if(IS_DIRECTORY "${msys2_bin_path}")
+            list(APPEND WINDOWS_RUNTIME_SEARCH_DIRS "${msys2_bin_path}")
+        endif()
     endif()
+    list(REMOVE_DUPLICATES WINDOWS_RUNTIME_SEARCH_DIRS)
 
     # Inspect the actual PE imports, including dependencies of dependencies.
     # Raw .dll.a link paths do not populate TARGET_RUNTIME_DLLS reliably.
@@ -229,6 +236,11 @@ elseif(WIN32)
 
     set(WINDOWS_DEPENDENCY_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/windows-runtime-dependencies.cmake")
     file(CONFIGURE OUTPUT "${WINDOWS_DEPENDENCY_SCRIPT}" CONTENT [=[
+cmake_minimum_required(VERSION 3.24)
+if(POLICY CMP0207)
+    cmake_policy(SET CMP0207 NEW)
+endif()
+
 set(CMAKE_GET_RUNTIME_DEPENDENCIES_PLATFORM "windows+pe")
 set(CMAKE_GET_RUNTIME_DEPENDENCIES_TOOL "objdump")
 set(CMAKE_GET_RUNTIME_DEPENDENCIES_COMMAND "@CMAKE_OBJDUMP@")
@@ -237,9 +249,10 @@ if(NOT DEFINED runtime_executable OR NOT EXISTS "${runtime_executable}")
     message(FATAL_ERROR "Windows executable does not exist: ${runtime_executable}")
 endif()
 
+set(runtime_search_dirs "@WINDOWS_RUNTIME_SEARCH_DIRS@")
 file(GET_RUNTIME_DEPENDENCIES
     EXECUTABLES "${runtime_executable}"
-    DIRECTORIES "@FFMPEG_ROOT@/bin" "@SDL3_ROOT@/bin" "@binPath@"
+    DIRECTORIES ${runtime_search_dirs}
     RESOLVED_DEPENDENCIES_VAR resolved_dlls
     UNRESOLVED_DEPENDENCIES_VAR unresolved_dlls
     CONFLICTING_DEPENDENCIES_PREFIX conflicting_dlls
@@ -249,7 +262,7 @@ file(GET_RUNTIME_DEPENDENCIES
 
 if(unresolved_dlls OR conflicting_dlls_FILENAMES)
     message(FATAL_ERROR
-        "Cannot package ${runtime_executable}. Missing DLLs: ${unresolved_dlls}; conflicting DLLs: ${conflicting_dlls_FILENAMES}")
+        "Cannot package ${runtime_executable}. Missing DLLs: ${unresolved_dlls}; conflicting DLLs: ${conflicting_dlls_FILENAMES}; search directories: ${runtime_search_dirs}")
 endif()
 
 foreach(runtime_dll IN LISTS resolved_dlls)
