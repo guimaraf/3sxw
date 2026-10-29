@@ -2,6 +2,9 @@
 #include "port/config/keymap.h"
 
 #include <SDL3/SDL.h>
+#if defined(SF3_UWP)
+#include "port/sdl/sdl_app.h"
+#endif
 
 #define INPUT_SOURCES_MAX 2
 #define INPUT_AXIS_DEADZONE (SDL_MAX_SINT16 / 4)
@@ -363,6 +366,12 @@ void SDLPad_GetButtonState(int id, SDLPad_ButtonState* state) {
     } else if (id != keyboard_index) {
         handle_screenshot_chord(id, state);
     }
+#if defined(SF3_UWP)
+    if (id != keyboard_index) {
+        SDLApp_TraceUWPInputSample(input_sources[id].gamepad.gamepad, id,
+            input_enabled && !wait_for_neutral[id] && !screenshot_chord_active[id]);
+    }
+#endif
 }
 
 bool SDLPad_TakeScreenshotRequested() {

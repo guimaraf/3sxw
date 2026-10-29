@@ -4,6 +4,14 @@
 #include <SDL3/SDL.h>
 
 #include "port/sdl/sdl_game_renderer.h"
+#if defined(SF3_UWP)
+#include "port/debug/debug_log.h"
+void SDLApp_TraceUWPInputEvent(const SDL_Event* event);
+void SDLApp_TraceUWPInputSample(SDL_Gamepad* pad, int slot, bool eligible);
+void SDLApp_TraceUWPInputCopy(Uint32 p1, Uint32 p2);
+void SDLApp_RecordUWPGameTiming(const DebugFrameTiming* frame, const DebugStepStats* steps,
+                               const DebugTaskStats* tasks);
+#endif
 
 typedef struct SDLAppFrameTiming {
     double sleep_ms;

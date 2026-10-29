@@ -468,6 +468,9 @@ static void game_step_0(DebugStepStats* step_stats, DebugTaskStats* task_stats) 
     }
 
     appCopyKeyData();
+#if defined(SF3_UWP)
+    SDLApp_TraceUWPInputCopy(PLsw[0][0], PLsw[1][0]);
+#endif
     DebugLog_RecordInputState(0, io_w.data[0].sw, PLsw[0][0]);
     DebugLog_RecordInputState(1, io_w.data[1].sw, PLsw[1][0]);
     if (step_stats != NULL) {
@@ -672,6 +675,7 @@ static int loop() {
             break;
 
         case MAIN_PHASE_INITIALIZED:
+#if !defined(SF3_UWP)
             if (!DebugLog_IsEnabled()) {
                 is_running = SDLApp_PollEvents();
 
@@ -687,6 +691,7 @@ static int loop() {
                 game_step_1(NULL);
                 break;
             }
+#endif
 
             const Uint64 frame_start_ns = SDL_GetTicksNS();
 
@@ -743,6 +748,9 @@ static int loop() {
             DebugLog_RecordFrameTiming(&frame_timing);
             DebugLog_RecordStepStats(&step_stats);
             DebugLog_RecordTaskStats(&task_stats);
+#if defined(SF3_UWP)
+            SDLApp_RecordUWPGameTiming(&frame_timing, &step_stats, &task_stats);
+#endif
 
             DebugRenderStats render_stats = {
                 .frame = debug_frame,

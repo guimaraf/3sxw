@@ -185,6 +185,12 @@ typedef struct
     UINT swapChainFlags;
     UINT syncInterval;
     UINT presentFlags;
+#ifdef SDL_PLATFORM_WINRT
+    Uint64 diagnosticPresentCalls;
+    Uint64 diagnosticPresentBusy;
+    Uint64 diagnosticPresentFailures;
+    Uint64 diagnosticPresentMaxNS;
+#endif
     ID3D11RenderTargetView *mainRenderTargetView;
     ID3D11RenderTargetView *currentOffscreenRenderTargetView;
     ID3D11InputLayout *inputLayout;
@@ -3044,6 +3050,9 @@ static bool D3D11_RenderPresent(SDL_Renderer *renderer)
 
     SDL_zero(parameters);
 
+#ifdef SDL_PLATFORM_WINRT
+    const Uint64 diagnosticPresentStart = SDL_GetTicksNS();
+#endif
 #if SDL_WINAPI_FAMILY_PHONE
     result = IDXGISwapChain_Present(data->swapChain, data->syncInterval, data->presentFlags);
 #else
@@ -3052,6 +3061,27 @@ static bool D3D11_RenderPresent(SDL_Renderer *renderer)
      * This option is not available on Windows Phone 8, to note.
      */
     result = IDXGISwapChain1_Present1(data->swapChain, data->syncInterval, data->presentFlags, &parameters);
+#endif
+
+#ifdef SDL_PLATFORM_WINRT
+    const Uint64 diagnosticPresentNS = SDL_GetTicksNS() - diagnosticPresentStart;
+    data->diagnosticPresentCalls++;
+    data->diagnosticPresentBusy += result == DXGI_ERROR_WAS_STILL_DRAWING;
+    data->diagnosticPresentFailures += FAILED(result) && result != DXGI_ERROR_WAS_STILL_DRAWING;
+    data->diagnosticPresentMaxNS = SDL_max(data->diagnosticPresentMaxNS, diagnosticPresentNS);
+    if (data->diagnosticPresentCalls == 1 || data->diagnosticPresentCalls % 120 == 0 ||
+        (result == DXGI_ERROR_WAS_STILL_DRAWING && data->diagnosticPresentBusy <= 8)) {
+        SDL_Log("[UWP_RENDER] d3d11_present calls=%llu busy=%llu failures=%llu "
+                "sync_interval=%u present_flags=0x%08X swap_chain_flags=0x%08X "
+                "hr=0x%08lX last_ms=%.3f max_since_log_ms=%.3f",
+                (unsigned long long)data->diagnosticPresentCalls,
+                (unsigned long long)data->diagnosticPresentBusy,
+                (unsigned long long)data->diagnosticPresentFailures,
+                data->syncInterval, data->presentFlags, data->swapChainFlags,
+                (unsigned long)result, (double)diagnosticPresentNS / 1e6,
+                (double)data->diagnosticPresentMaxNS / 1e6);
+        data->diagnosticPresentMaxNS = 0;
+    }
 #endif
 
     // When the present flips, it unbinds the current view, so bind it again on the next draw call
@@ -3112,6 +3142,10 @@ static bool D3D11_SetVSync(SDL_Renderer *renderer, const int vsync)
         data->syncInterval = 0;
     }
     D3D11_UpdatePresentFlags(renderer);
+#ifdef SDL_PLATFORM_WINRT
+    SDL_Log("[UWP_RENDER] d3d11_vsync requested=%d sync_interval=%u present_flags=0x%08X swap_chain_flags=0x%08X",
+            vsync, data->syncInterval, data->presentFlags, data->swapChainFlags);
+#endif
     return true;
 }
 

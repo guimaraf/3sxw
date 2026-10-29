@@ -77,9 +77,15 @@ viewport to check whether the menu scale recovers after successful shader setup.
 
 ## Xbox One performance diagnostics
 
-`uwp_render_check.log` version 4 uses the `UWP Diagnostic Writer` thread for
+`uwp_render_check.log` version 6 uses the `UWP Diagnostic Writer` thread for
 file writes and flushes. The main thread only queues bounded messages; it does
-not wait for disk I/O or queue space. The 128-entry queue occupies 512 KiB.
+not wait for disk I/O or queue space. The queue holds 128 messages and occupies
+516 KiB, including an extra ring slot to distinguish full from empty.
+Version 5 uses atomic read/write indices and a semaphore wakeup instead of a
+queue mutex. The vendored SDL serializes its log callbacks, providing a single
+producer at a time; one worker consumes published messages. Only a full queue
+drops messages, not mutex contention. This relies on the vendored SDL's serialization
+and must be reviewed if its logging implementation is replaced.
 Captured diagnostics are not also forwarded to the synchronous debugger output.
 The worker flushes about once a second and drains the queue on orderly shutdown.
 A forced termination can lose recent messages. The log is capped at 4 MiB.
@@ -97,7 +103,8 @@ are also logged. These counters do not require the desktop debug CSV logger.
 its synchronous I/O can still affect performance.
 
 `frame_ms` covers BeginFrame through EndFrame, including pacing. `work_ms`
-excludes pacing; `pre_render_ms` includes BeginFrame and game_step_0, including
+excludes software pacing but includes any VSync wait inside Present;
+`pre_render_ms` includes BeginFrame and game_step_0, including
 texture creation there. Texture creation time is a subset, not an additional
 phase to add to the total. `previous_begin_interval_ms` measures the preceding
 BeginFrame-to-BeginFrame interval, including game_step_1, event polling and
@@ -113,7 +120,7 @@ slow reads stop being detailed. Reads retain their existing behavior.
 Verbose viewport/geometry and successful-texture messages are disabled by
 default. Set the SDL hint/environment `SF3_UWP_VERBOSE_RENDER_TRACE=1` only
 when investigating rendering correctness. Render/shader errors remain logged.
-Shader Model 4, existing caches, audio loading and frame pacing are unchanged.
+Shader Model 4, existing caches, audio loading and the simulation target are unchanged.
 The session header reports main/logger thread IDs and logical CPU count; this
 does not enumerate all process threads or establish an exclusive CPU allocation.
 
@@ -129,7 +136,7 @@ invalidate the cache. Dimension/format changes force recreation.
 The SDL hint `SF3_UWP_TEXTURE_REUSE` is read at renderer initialization and defaults
 to `1`; setting it to `0` before initialization provides the previous creation
 path for comparison. `[UWP_RENDER] texture_reuse enabled=1 snapshot_protection=1`
-confirms the selected path. Shader Model 4, audio loading and pacing are unchanged.
+confirms the selected path. Shader Model 4 and audio loading are unchanged.
 
 `[UWP_PERF] cache kind=slow` accompanies detailed slow frames. `kind=window`
 aggregates the same 120 frames as the preceding window record: counters/bytes
@@ -147,16 +154,94 @@ timing for initial uploads. Stage/area IDs, player character IDs, background
 world X and player X positions identify the context of slow records and state
 transitions; window context is sampled at the end, not throughout the window.
 
+Version 5 requests VSync interval 1 on UWP by default. The initialization-only
+SDL hint `SF3_UWP_VSYNC=0` restores the previous unsynchronized mode for an A/B
+test. `[UWP_RENDER] vsync` records the requested/effective SDL values, success,
+display mode and reported refresh rate. Zero/unknown refresh information is not
+proof of the physical TV mode. `[UWP_RENDER] d3d11_vsync` records actual backend
+interval and flags; with interval 1 the expected present flags are zero.
+`d3d11_present` reports cumulative calls, busy results (`DXGI_ERROR_WAS_STILL_DRAWING`),
+other failures, last HRESULT and elapsed/max driver-call time. It logs the first
+call, every 120 calls and the first eight busy results. Max time resets after
+each such log. These calls include initialization and do not equal game-frame
+IDs or prove that frames reached the display. Existing error handling is kept.
+
+The original arcade/PS2 simulation target and absolute software pacing algorithm
+remain in place. VSync can add blocking time inside Present, so assess its
+interaction with the software deadline and the display's refresh rate on console.
+In particular, 59.59949 FPS does not divide evenly into a fixed 60 Hz refresh;
+occasional repeated display frames can remain even if tearing is eliminated.
+This test does not change the simulation to 60 FPS or add frame skipping.
+
+The existing game-step/task timers run on UWP even when the desktop CSV logger
+is disabled. `[UWP_PERF] game`, `steps` and `tasks` report 120-frame per-field
+maxima (`kind=window`) and up to eight detailed slow full-loop frames per window
+(`kind=slow`, total above 20 ms). Game records include event polling, BeginFrame,
+game_step_0, EndFrame excluding software sleep, and game_step_1. Step records
+separate AFS completion handling, input, task execution, sprite draw preparation,
+effects, flip and post-frame services. `game_main_ms` contains several other
+steps and must not be added to them. Task records show the eleven task times,
+the slowest task ID and its pre-execution state. For window records, each task
+time is its own maximum and `peak_task_frame` identifies the largest task sample.
+Window maxima can come from different frames and their scene context is sampled
+at the end. These timers are elapsed CPU-side times, including any waits, not
+proof of decompression, disk I/O or GPU saturation. CSV output remains disabled
+unless separately enabled in configuration. Timers and logging add some overhead.
+
 For the next console test, keep verbose rendering and desktop CSV diagnostics
 disabled. Navigate title/menu, enter character select, play at least two rounds,
 and repeat a mode transition. Compare the Alex stage with the quieter forest
 stage, testing left, center and right positions and repeated attacks. Check
 sprite animation, transparency, palette changes and super effects for visual
-regressions. Note whether pauses occur only on first use or also on repetition.
+regressions. Check tearing during horizontal movement and whether control
+response or overall speed changes with VSync. If possible, repeat Remy in the
+same session and start a separate session with Alex to separate first-use work
+from stage-specific cost. Note whether pauses occur only on first use or also on repetition.
 Wait five seconds after the last action, then download
 `uwp_render_check.log` and `uwp_resource_check.log` before restarting the app.
 The last partial 120-frame window may not have a summary, but slow details and
 state transitions are queued immediately. Build and runtime testing are local.
+
+### Version 6: internal input timing
+
+Gamepad button edges (including digital D-pad) are traced from the SDL event
+timestamp through polling, a raw-state sample, the game's command-copy boundary
+after appCopyKeyData, and the return of that iteration's RenderPresent. Axes,
+keyboard, physical switch activation and TV scanout are not traced. SDL timestamps
+may begin when the backend detects input, so this does not measure hardware input
+latency. Present return is not a display timestamp or proof of a visible response.
+
+`[UWP_PERF] input` includes device/slot/button/direction, timestamps, elapsed times,
+raw-state agreement, eligibility and the two PLsw command masks at the copy
+boundary. This is a temporal correlation, not proof that this individual button
+was mapped to a command, accepted by gameplay, or produced an animation. A button
+press and release pumped together can legitimately disagree with the final sampled
+state. Focus suppression, screenshot chords, unmapped devices and absent samples
+must not automatically be interpreted as lost inputs. No input behavior changes.
+
+`event_to_present_return_ms` includes VSync and game work after polling, and can
+reveal a delayed presentation opportunity during a game stall. `present_ok` is
+SDL's return status; correlate with DXGI busy/failure counters. Missing stages or
+invalid/zero/future event timestamps have elapsed values of -1. The bounded
+128-event scratch buffer drops trace records only when full. `input_window`
+summarizes all collected events every 120 frames, including overflow, uncorrelated
+events, invalid timestamps, detail omissions and maximum internal elapsed times.
+Detail output is capped per 120 frames at eight normal events plus sixteen events
+with event-to-present-return time above 40 ms. Counts continue after that cap.
+
+To reduce file size, routine cache and game/step/task window records are emitted
+every 600 frames, describing only the most recent 120-frame window; intermediate
+windows are not retained. Frame cadence and input summaries remain every 120
+frames, and existing slow-frame details remain enabled. The 4 MiB file limit and
+logger loss counters still apply. Keep logs short for this input-focused test.
+
+Test repeated single button presses/releases, held directions, quick taps and
+normal combos during combat. Include menus and a naturally occurring hitch;
+avoid intentionally changing gameplay timing. Note any perceived delayed command.
+Wait five seconds, then copy both diagnostic logs before restarting the app.
+Expect render_trace_version=6. External high-speed measurement is still required
+for physical-button-to-visible-response latency. No build or hardware validation
+was performed by the agent.
 
 ## Packaging and signing
 

@@ -65,7 +65,6 @@ static UWPRenderLogCapture uwp_render_log_capture;
 static char uwp_window_renderer_error[1024];
 
 static SDL_IOStream* uwp_render_trace_file;
-static SDL_Mutex* uwp_render_trace_mutex;
 static SDL_LogOutputFunction uwp_trace_previous_output;
 static void* uwp_trace_previous_userdata;
 static size_t uwp_render_trace_bytes;
@@ -73,27 +72,142 @@ static Uint64 uwp_render_trace_frame;
 static bool uwp_render_trace_sample;
 static unsigned int uwp_render_trace_samples;
 #define UWP_TRACE_QUEUE_CAPACITY 128
+#define UWP_TRACE_QUEUE_SLOTS (UWP_TRACE_QUEUE_CAPACITY + 1)
 #define UWP_TRACE_LINE_SIZE 4096
 #define UWP_TRACE_LIMIT (4 * 1024 * 1024)
-static char uwp_trace_queue[UWP_TRACE_QUEUE_CAPACITY][UWP_TRACE_LINE_SIZE];
-static unsigned int uwp_trace_head, uwp_trace_count, uwp_trace_high_water;
-static SDL_Condition* uwp_trace_condition;
+static char uwp_trace_queue[UWP_TRACE_QUEUE_SLOTS][UWP_TRACE_LINE_SIZE];
+static SDL_AtomicInt uwp_trace_head, uwp_trace_tail, uwp_trace_high_water;
+static SDL_Semaphore* uwp_trace_wakeup;
 static SDL_Thread* uwp_trace_thread;
 static SDL_AtomicInt uwp_trace_dropped;
-static bool uwp_trace_stop;
+static SDL_AtomicInt uwp_trace_stop;
 static bool uwp_trace_verbose;
 static SDL_ThreadID uwp_trace_main_thread;
 static Uint64 uwp_frame_start_ns, uwp_previous_frame_start_ns;
 static double uwp_frame_interval_ms, uwp_pre_render_ms;
 
-/* Only the worker touches the stream. Never hold the queue lock during disk I/O. */
+typedef struct UWPInputTrace {
+    Uint64 sequence, event_ns, poll_ns, sample_ns, copy_ns;
+    SDL_JoystickID device;
+    int button, slot;
+    bool down, observed, eligible;
+    Uint32 p1, p2;
+} UWPInputTrace;
+static UWPInputTrace uwp_inputs[128];
+static unsigned int uwp_input_count, uwp_input_overflow;
+static Uint64 uwp_input_sequence;
+
+void SDLApp_TraceUWPInputEvent(const SDL_Event* event) {
+    if (uwp_trace_thread == NULL || (event->type != SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
+        event->type != SDL_EVENT_GAMEPAD_BUTTON_UP)) {
+        return;
+    }
+    if (uwp_input_count == SDL_arraysize(uwp_inputs)) {
+        uwp_input_overflow++;
+        return;
+    }
+    UWPInputTrace* trace = &uwp_inputs[uwp_input_count++];
+    SDL_zero(*trace);
+    trace->sequence = ++uwp_input_sequence;
+    trace->event_ns = event->gbutton.timestamp;
+    trace->poll_ns = SDL_GetTicksNS();
+    trace->device = event->gbutton.which;
+    trace->button = event->gbutton.button;
+    trace->down = event->gbutton.down;
+    trace->slot = -1;
+}
+
+void SDLApp_TraceUWPInputSample(SDL_Gamepad* pad, int slot, bool eligible) {
+    if (uwp_input_count == 0 || pad == NULL) {
+        return;
+    }
+    const SDL_JoystickID device = SDL_GetGamepadID(pad);
+    const Uint64 now = SDL_GetTicksNS();
+    for (unsigned int i = 0; i < uwp_input_count; i++) {
+        UWPInputTrace* trace = &uwp_inputs[i];
+        if (trace->device == device && trace->sample_ns == 0) {
+            trace->sample_ns = now;
+            trace->slot = slot;
+            trace->eligible = eligible;
+            trace->observed = SDL_GetGamepadButton(pad, (SDL_GamepadButton)trace->button) == trace->down;
+        }
+    }
+}
+
+void SDLApp_TraceUWPInputCopy(Uint32 p1, Uint32 p2) {
+    const Uint64 now = uwp_input_count ? SDL_GetTicksNS() : 0;
+    for (unsigned int i = 0; i < uwp_input_count; i++) {
+        UWPInputTrace* trace = &uwp_inputs[i];
+        if (trace->sample_ns != 0 && trace->copy_ns == 0) {
+            trace->copy_ns = now;
+            trace->p1 = p1;
+            trace->p2 = p2;
+        }
+    }
+}
+
+static double uwp_input_elapsed(Uint64 start, Uint64 end) {
+    return start != 0 && end >= start ? (double)(end - start) / 1e6 : -1.0;
+}
+
+static void finish_uwp_input_trace(Uint64 present_begin, Uint64 present_end, bool present_ok) {
+    static unsigned int events, unobserved, invalid_timestamps, details, slow_details, omitted;
+    static double max_poll_ms, max_copy_ms, max_present_ms;
+    for (unsigned int i = 0; i < uwp_input_count; i++) {
+        const UWPInputTrace* trace = &uwp_inputs[i];
+        const bool valid_time = trace->event_ns != 0 && trace->event_ns <= trace->poll_ns;
+        const double poll_ms = valid_time ? uwp_input_elapsed(trace->event_ns, trace->poll_ns) : -1.0;
+        const double copy_ms = valid_time ? uwp_input_elapsed(trace->event_ns, trace->copy_ns) : -1.0;
+        const double present_ms = valid_time ? uwp_input_elapsed(trace->event_ns, present_end) : -1.0;
+        events++;
+        unobserved += !trace->observed || !trace->eligible || trace->copy_ns == 0;
+        invalid_timestamps += !valid_time;
+        max_poll_ms = SDL_max(max_poll_ms, poll_ms);
+        max_copy_ms = SDL_max(max_copy_ms, copy_ms);
+        max_present_ms = SDL_max(max_present_ms, present_ms);
+        const bool emit = present_ms > 40.0 ? slow_details++ < 16 : details++ < 8;
+        if (emit) {
+            SDL_Log("[UWP_PERF] input seq=%llu frame=%llu device=%u slot=%d button=%d down=%d "
+                    "timestamp_valid=%d raw_state_matches=%d eligible=%d copy_seen=%d "
+                    "event_ns=%llu poll_ns=%llu sample_ns=%llu copy_ns=%llu "
+                    "event_to_poll_ms=%.3f event_to_copy_ms=%.3f event_to_present_return_ms=%.3f "
+                    "poll_to_sample_ms=%.3f copy_to_present_begin_ms=%.3f present_call_ms=%.3f "
+                    "present_ok=%d p1_mask=0x%08X p2_mask=0x%08X",
+                    (unsigned long long)trace->sequence, (unsigned long long)uwp_render_trace_frame,
+                    (unsigned int)trace->device, trace->slot, trace->button, trace->down,
+                    valid_time, trace->observed, trace->eligible, trace->copy_ns != 0,
+                    (unsigned long long)trace->event_ns, (unsigned long long)trace->poll_ns,
+                    (unsigned long long)trace->sample_ns, (unsigned long long)trace->copy_ns,
+                    poll_ms, copy_ms, present_ms, uwp_input_elapsed(trace->poll_ns, trace->sample_ns),
+                    uwp_input_elapsed(trace->copy_ns, present_begin),
+                    uwp_input_elapsed(present_begin, present_end), present_ok,
+                    (unsigned int)trace->p1, (unsigned int)trace->p2);
+        } else {
+            omitted++;
+        }
+    }
+    uwp_input_count = 0;
+    if (uwp_render_trace_frame % 120 == 0) {
+        SDL_Log("[UWP_PERF] input_window frame=%llu events=%u uncorrelated=%u invalid_timestamps=%u "
+                "trace_overflow=%u details_omitted=%u max_event_to_poll_ms=%.3f "
+                "max_event_to_copy_ms=%.3f max_event_to_present_return_ms=%.3f",
+                (unsigned long long)uwp_render_trace_frame, events, unobserved, invalid_timestamps,
+                uwp_input_overflow, omitted, max_poll_ms, max_copy_ms, max_present_ms);
+        events = unobserved = invalid_timestamps = details = slow_details = omitted = uwp_input_overflow = 0;
+        max_poll_ms = max_copy_ms = max_present_ms = 0.0;
+    }
+}
+
+/* Vendored SDL serializes log callbacks with SDL_log_function_lock. Atomic
+ * publication transfers each completed slot to the single consumer; no queue
+ * mutex or disk I/O is used by producers. One extra slot distinguishes full/empty. */
 static int uwp_render_trace_worker(void* userdata) {
     (void)userdata;
     SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_LOW);
     char header[512];
     SDL_snprintf(header, sizeof(header),
         "ticks_ms=%llu [UWP_RENDER] session build=%s %s SDL_headers=%d SDL_runtime=%d "
-        "render_trace_version=4 limit_bytes=4194304 async_log=1 verbose=%d "
+        "render_trace_version=6 limit_bytes=4194304 async_log=1 verbose=%d "
         "logical_cpus=%d main_thread=%llu log_worker=%llu\n",
         (unsigned long long)SDL_GetTicks(), __DATE__, __TIME__, SDL_VERSION, SDL_GetVersion(),
         uwp_trace_verbose, SDL_GetNumLogicalCPUCores(), (unsigned long long)uwp_trace_main_thread,
@@ -106,18 +220,17 @@ static int uwp_render_trace_worker(void* userdata) {
     for (;;) {
         char batch[4][UWP_TRACE_LINE_SIZE];
         unsigned int count = 0, high_water;
-        SDL_LockMutex(uwp_render_trace_mutex);
-        if (uwp_trace_count == 0 && !uwp_trace_stop) {
-            SDL_WaitConditionTimeout(uwp_trace_condition, uwp_render_trace_mutex, 250);
+        int head = SDL_GetAtomicInt(&uwp_trace_head);
+        if (head == SDL_GetAtomicInt(&uwp_trace_tail) && !SDL_GetAtomicInt(&uwp_trace_stop)) {
+            SDL_WaitSemaphoreTimeout(uwp_trace_wakeup, 250);
         }
-        while (count < SDL_arraysize(batch) && uwp_trace_count != 0) {
-            SDL_strlcpy(batch[count++], uwp_trace_queue[uwp_trace_head], UWP_TRACE_LINE_SIZE);
-            uwp_trace_head = (uwp_trace_head + 1) % UWP_TRACE_QUEUE_CAPACITY;
-            uwp_trace_count--;
+        while (count < SDL_arraysize(batch) && head != SDL_GetAtomicInt(&uwp_trace_tail)) {
+            SDL_strlcpy(batch[count++], uwp_trace_queue[head], UWP_TRACE_LINE_SIZE);
+            head = (head + 1) % UWP_TRACE_QUEUE_SLOTS;
+            SDL_SetAtomicInt(&uwp_trace_head, head);
         }
-        const bool done = uwp_trace_stop && uwp_trace_count == 0;
-        high_water = uwp_trace_high_water;
-        SDL_UnlockMutex(uwp_render_trace_mutex);
+        const bool done = SDL_GetAtomicInt(&uwp_trace_stop) && head == SDL_GetAtomicInt(&uwp_trace_tail);
+        high_water = (unsigned int)SDL_GetAtomicInt(&uwp_trace_high_water);
         for (unsigned int i = 0; i < count; i++) {
             const size_t length = SDL_strlen(batch[i]);
             if (uwp_render_trace_bytes + length > UWP_TRACE_LIMIT - 1024) {
@@ -179,20 +292,20 @@ static void SDLCALL write_uwp_render_trace(void* userdata, int category,
         char line[4096];
         SDL_snprintf(line, sizeof(line), "ticks_ms=%llu category=%d priority=%d %s\n",
                      (unsigned long long)SDL_GetTicks(), category, (int)priority, message);
-        if (!SDL_TryLockMutex(uwp_render_trace_mutex)) {
-            SDL_AddAtomicInt(&uwp_trace_dropped, 1);
-            return;
-        }
-        if (uwp_trace_count < UWP_TRACE_QUEUE_CAPACITY) {
-            const unsigned int tail = (uwp_trace_head + uwp_trace_count) % UWP_TRACE_QUEUE_CAPACITY;
+        const int tail = SDL_GetAtomicInt(&uwp_trace_tail);
+        const int next = (tail + 1) % UWP_TRACE_QUEUE_SLOTS;
+        const int head = SDL_GetAtomicInt(&uwp_trace_head);
+        if (next != head) {
             SDL_strlcpy(uwp_trace_queue[tail], line, UWP_TRACE_LINE_SIZE);
-            uwp_trace_count++;
-            uwp_trace_high_water = SDL_max(uwp_trace_high_water, uwp_trace_count);
-            SDL_SignalCondition(uwp_trace_condition);
+            SDL_SetAtomicInt(&uwp_trace_tail, next);
+            const int queued = (next + UWP_TRACE_QUEUE_SLOTS - head) % UWP_TRACE_QUEUE_SLOTS;
+            if (queued > SDL_GetAtomicInt(&uwp_trace_high_water)) {
+                SDL_SetAtomicInt(&uwp_trace_high_water, queued);
+            }
+            SDL_SignalSemaphore(uwp_trace_wakeup);
         } else {
             SDL_AddAtomicInt(&uwp_trace_dropped, 1);
         }
-        SDL_UnlockMutex(uwp_render_trace_mutex);
         /* OutputDebugString is also synchronous; don't forward captured diagnostics. */
         return;
     }
@@ -207,36 +320,33 @@ static void init_uwp_render_trace(void) {
     if (directory == NULL || SDL_asprintf(&path, "%suwp_render_check.log", directory) < 0) {
         return;
     }
-    uwp_render_trace_mutex = SDL_CreateMutex();
-    uwp_trace_condition = SDL_CreateCondition();
-    if (uwp_render_trace_mutex != NULL && uwp_trace_condition != NULL) {
+    uwp_trace_wakeup = SDL_CreateSemaphore(0);
+    if (uwp_trace_wakeup != NULL) {
         uwp_render_trace_file = SDL_IOFromFile(path, "wb");
     }
     SDL_free(path);
     if (uwp_render_trace_file == NULL) {
-        SDL_DestroyCondition(uwp_trace_condition);
-        uwp_trace_condition = NULL;
-        SDL_DestroyMutex(uwp_render_trace_mutex);
-        uwp_render_trace_mutex = NULL;
+        SDL_DestroySemaphore(uwp_trace_wakeup);
+        uwp_trace_wakeup = NULL;
         SDL_Log("Couldn't open the UWP render diagnostic: %s", SDL_GetError());
         return;
     }
     uwp_render_trace_bytes = 0;
     uwp_render_trace_frame = 0;
     uwp_render_trace_samples = 0;
-    uwp_trace_head = uwp_trace_count = uwp_trace_high_water = 0;
+    SDL_SetAtomicInt(&uwp_trace_head, 0);
+    SDL_SetAtomicInt(&uwp_trace_tail, 0);
+    SDL_SetAtomicInt(&uwp_trace_high_water, 0);
     SDL_SetAtomicInt(&uwp_trace_dropped, 0);
-    uwp_trace_stop = false;
+    SDL_SetAtomicInt(&uwp_trace_stop, 0);
     uwp_trace_verbose = SDL_GetHintBoolean("SF3_UWP_VERBOSE_RENDER_TRACE", false);
     uwp_trace_main_thread = SDL_GetCurrentThreadID();
     uwp_trace_thread = SDL_CreateThread(uwp_render_trace_worker, "UWP Diagnostic Writer", NULL);
     if (uwp_trace_thread == NULL) {
         SDL_CloseIO(uwp_render_trace_file);
         uwp_render_trace_file = NULL;
-        SDL_DestroyCondition(uwp_trace_condition);
-        uwp_trace_condition = NULL;
-        SDL_DestroyMutex(uwp_render_trace_mutex);
-        uwp_render_trace_mutex = NULL;
+        SDL_DestroySemaphore(uwp_trace_wakeup);
+        uwp_trace_wakeup = NULL;
         SDL_Log("Couldn't start the UWP diagnostic worker: %s", SDL_GetError());
         return;
     }
@@ -425,7 +535,9 @@ static void record_uwp_frame_perf(const SDLAppFrameTiming* timing, double work_m
                 max_adx_ms, max_geometry_ms, max_copy_ms,
                 max_present_ms, max_cleanup_ms, max_create_ms, max_sleep_overrun_ms,
                 texture_creates, texture_failures, ADX_GetQueuedBytes(), ADX_GetNumFiles(), DebugLog_IsEnabled());
-        log_uwp_cache_stats("window", &cache_window);
+        if (uwp_render_trace_frame % 600 == 0) {
+            log_uwp_cache_stats("window", &cache_window);
+        }
         SDL_zero(cache_window);
         frames = over_20 = over_33 = slow_details = texture_creates = texture_failures = 0;
         total_ms = max_frame_ms = max_interval_ms = max_work_ms = max_pre_render_ms = 0.0;
@@ -433,6 +545,110 @@ static void record_uwp_frame_perf(const SDLAppFrameTiming* timing, double work_m
         max_create_ms = max_sleep_overrun_ms = 0.0;
         intervals = intervals_over_20 = intervals_over_33 = 0;
         total_interval_ms = 0.0;
+    }
+}
+
+static void log_uwp_game_profile(const char* kind, const DebugFrameTiming* frame,
+                                 const DebugStepStats* steps, const DebugTaskStats* tasks) {
+    int top_task = 0;
+    for (int i = 1; i < DEBUG_TASK_STATS_COUNT; i++) {
+        if (tasks->task_ms[i] > tasks->task_ms[top_task]) {
+            top_task = i;
+        }
+    }
+    SDL_Log("[UWP_PERF] game kind=%s frame=%llu stage=%d p1=%d p2=%d "
+            "total_ms=%.3f poll_ms=%.3f begin_ms=%.3f game0_ms=%.3f end_work_ms=%.3f game1_ms=%.3f sleep_ms=%.3f",
+            kind, (unsigned long long)uwp_render_trace_frame, bg_w.stage,
+            plw[0].player_number, plw[1].player_number, frame->total_ms, frame->poll_ms,
+            frame->begin_ms, frame->game0_ms, frame->end_ms, frame->game1_ms, frame->sleep_ms);
+    SDL_Log("[UWP_PERF] steps kind=%s frame=%llu afs_ms=%.3f priority_ms=%.3f "
+            "pad_ms=%.3f key_ms=%.3f input_ms=%.3f nj_user_ms=%.3f "
+            "seq_before_ms=%.3f draw_ms=%.3f seq_after_ms=%.3f game_main_ms=%.3f "
+            "knj_ms=%.3f effects_ms=%.3f flip_ms=%.3f scrn_ms=%.3f "
+            "irl_family_ms=%.3f irl_scrn_ms=%.3f bgm_ms=%.3f test_prologue_ms=%.3f",
+            kind, (unsigned long long)uwp_render_trace_frame, steps->afs_run_server_ms,
+            steps->setup_temp_priority_ms, steps->pad_get_all_ms, steps->key_convert_ms,
+            steps->input_copy_ms, steps->nj_user_main_ms, steps->seqs_before_process_ms,
+            steps->njdp2d_draw_ms, steps->seqs_after_process_ms, steps->game_main_ms,
+            steps->knj_flush_ms, steps->disp_effect_work_ms, steps->fl_flip_ms,
+            steps->scrn_renew_ms, steps->irl_family_ms, steps->irl_scrn_ms,
+            steps->bgm_server_ms, steps->test_prologue_ms);
+    SDL_Log("[UWP_PERF] tasks kind=%s frame=%llu top_task=%d top_ms=%.3f "
+            "condition=%d r=%d,%d,%d,%d peak_task_frame=%llu "
+            "task_ms=%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f",
+            kind, (unsigned long long)uwp_render_trace_frame, top_task, tasks->task_ms[top_task],
+            tasks->condition[top_task], tasks->r_no[top_task][0], tasks->r_no[top_task][1],
+            tasks->r_no[top_task][2], tasks->r_no[top_task][3], (unsigned long long)tasks->frame,
+            tasks->task_ms[0], tasks->task_ms[1], tasks->task_ms[2], tasks->task_ms[3],
+            tasks->task_ms[4], tasks->task_ms[5], tasks->task_ms[6], tasks->task_ms[7],
+            tasks->task_ms[8], tasks->task_ms[9], tasks->task_ms[10]);
+}
+
+void SDLApp_RecordUWPGameTiming(const DebugFrameTiming* frame, const DebugStepStats* steps,
+                               const DebugTaskStats* tasks) {
+    static DebugFrameTiming window_frame;
+    static DebugStepStats window_steps;
+    static DebugTaskStats window_tasks;
+    static unsigned int frames, slow_frames;
+    static double peak_task_ms;
+    if (uwp_trace_thread == NULL) {
+        return;
+    }
+    frames++;
+#define UWP_FRAME_MAX(field) window_frame.field = SDL_max(window_frame.field, frame->field)
+    UWP_FRAME_MAX(total_ms);
+    UWP_FRAME_MAX(poll_ms);
+    UWP_FRAME_MAX(begin_ms);
+    UWP_FRAME_MAX(game0_ms);
+    UWP_FRAME_MAX(end_ms);
+    UWP_FRAME_MAX(game1_ms);
+    UWP_FRAME_MAX(sleep_ms);
+#undef UWP_FRAME_MAX
+#define UWP_STEP_MAX(field) window_steps.field = SDL_max(window_steps.field, steps->field)
+    UWP_STEP_MAX(afs_run_server_ms);
+    UWP_STEP_MAX(setup_temp_priority_ms);
+    UWP_STEP_MAX(pad_get_all_ms);
+    UWP_STEP_MAX(key_convert_ms);
+    UWP_STEP_MAX(test_prologue_ms);
+    UWP_STEP_MAX(input_copy_ms);
+    UWP_STEP_MAX(game_main_ms);
+    UWP_STEP_MAX(nj_user_main_ms);
+    UWP_STEP_MAX(seqs_before_process_ms);
+    UWP_STEP_MAX(njdp2d_draw_ms);
+    UWP_STEP_MAX(seqs_after_process_ms);
+    UWP_STEP_MAX(knj_flush_ms);
+    UWP_STEP_MAX(disp_effect_work_ms);
+    UWP_STEP_MAX(fl_flip_ms);
+    UWP_STEP_MAX(scrn_renew_ms);
+    UWP_STEP_MAX(irl_family_ms);
+    UWP_STEP_MAX(irl_scrn_ms);
+    UWP_STEP_MAX(bgm_server_ms);
+#undef UWP_STEP_MAX
+    for (int i = 0; i < DEBUG_TASK_STATS_COUNT; i++) {
+        if (tasks->task_ms[i] > window_tasks.task_ms[i]) {
+            window_tasks.task_ms[i] = tasks->task_ms[i];
+            window_tasks.condition[i] = tasks->condition[i];
+            SDL_memcpy(window_tasks.r_no[i], tasks->r_no[i], sizeof(window_tasks.r_no[i]));
+        }
+        if (tasks->task_ms[i] > peak_task_ms) {
+            peak_task_ms = tasks->task_ms[i];
+            window_tasks.frame = uwp_render_trace_frame;
+        }
+    }
+    if (frame->total_ms > 20.0 && slow_frames++ < 8) {
+        DebugTaskStats current_tasks = *tasks;
+        current_tasks.frame = uwp_render_trace_frame;
+        log_uwp_game_profile("slow", frame, steps, &current_tasks);
+    }
+    if (frames == 120) {
+        if (uwp_render_trace_frame % 600 == 0) {
+            log_uwp_game_profile("window", &window_frame, &window_steps, &window_tasks);
+        }
+        SDL_zero(window_frame);
+        SDL_zero(window_steps);
+        SDL_zero(window_tasks);
+        frames = slow_frames = 0;
+        peak_task_ms = 0.0;
     }
 }
 
@@ -636,9 +852,26 @@ static bool init_window() {
         return false;
     }
 
+#if defined(SF3_UWP)
+    const int requested_vsync = SDL_GetHintBoolean("SF3_UWP_VSYNC", true) ? 1 : 0;
+    const bool vsync_set = SDL_SetRenderVSync(renderer, requested_vsync);
+    char vsync_error[256];
+    SDL_strlcpy(vsync_error, vsync_set ? "none" : SDL_GetError(), sizeof(vsync_error));
+    int effective_vsync = -99;
+    const bool vsync_query = SDL_GetRenderVSync(renderer, &effective_vsync);
+    const SDL_DisplayID display = SDL_GetDisplayForWindow(window);
+    const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(display);
+    SDL_Log("[UWP_RENDER] vsync requested=%d set_ok=%d query_ok=%d effective=%d error=%s "
+            "display=%u mode=%dx%d refresh_hz=%.6f refresh_fraction=%d/%d target_fps=%.6f",
+            requested_vsync, vsync_set, vsync_query, effective_vsync, vsync_error, (unsigned int)display,
+            mode ? mode->w : 0, mode ? mode->h : 0, mode ? mode->refresh_rate : 0.0,
+            mode ? mode->refresh_rate_numerator : 0, mode ? mode->refresh_rate_denominator : 0,
+            target_frame_rate);
+#else
     if (!SDL_SetRenderVSync(renderer, 0)) {
         SDL_Log("Failed to disable renderer VSync: %s", SDL_GetError());
     }
+#endif
 
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
@@ -835,18 +1068,14 @@ void SDLApp_Quit() {
         SDL_Log("[UWP_RENDER] session_end frames=%llu samples=%u",
                 (unsigned long long)uwp_render_trace_frame, uwp_render_trace_samples);
         SDL_SetLogOutputFunction(uwp_trace_previous_output, uwp_trace_previous_userdata);
-        SDL_LockMutex(uwp_render_trace_mutex);
-        uwp_trace_stop = true;
-        SDL_SignalCondition(uwp_trace_condition);
-        SDL_UnlockMutex(uwp_render_trace_mutex);
+        SDL_SetAtomicInt(&uwp_trace_stop, 1);
+        SDL_SignalSemaphore(uwp_trace_wakeup);
         SDL_WaitThread(uwp_trace_thread, NULL);
         uwp_trace_thread = NULL;
         SDL_CloseIO(uwp_render_trace_file);
         uwp_render_trace_file = NULL;
-        SDL_DestroyMutex(uwp_render_trace_mutex);
-        uwp_render_trace_mutex = NULL;
-        SDL_DestroyCondition(uwp_trace_condition);
-        uwp_trace_condition = NULL;
+        SDL_DestroySemaphore(uwp_trace_wakeup);
+        uwp_trace_wakeup = NULL;
     }
 #endif
     SDL_Quit();
@@ -898,6 +1127,9 @@ bool SDLApp_PollEvents() {
     bool continue_running = true;
 
     while (SDL_PollEvent(&event)) {
+#if defined(SF3_UWP)
+        SDLApp_TraceUWPInputEvent(&event);
+#endif
         switch (event.type) {
         case SDL_EVENT_GAMEPAD_ADDED:
         case SDL_EVENT_GAMEPAD_REMOVED:
@@ -1221,10 +1453,18 @@ void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
 #endif
 
     const Uint64 present_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
-    UWP_RENDER_CALL(SDL_RenderPresent(renderer));
+    const bool present_ok = UWP_RENDER_CALL(SDL_RenderPresent(renderer));
+#if defined(SF3_UWP)
+    const Uint64 input_present_end_ns = SDL_GetTicksNS();
+#else
+    (void)present_ok;
+#endif
     if (timing != NULL) {
         timing->present_ms = (double)(SDL_GetTicksNS() - present_start_ns) / 1e6;
     }
+#if defined(SF3_UWP)
+    finish_uwp_input_trace(present_start_ns, input_present_end_ns, present_ok);
+#endif
 
     // Cleanup
     const Uint64 cleanup_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
