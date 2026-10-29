@@ -197,6 +197,11 @@ typedef struct
     ID3D11SamplerState *samplers[RENDER_SAMPLER_COUNT];
     D3D_FEATURE_LEVEL featureLevel;
     bool pixelSizeChanged;
+#ifdef SDL_PLATFORM_WINRT
+    unsigned int diagnosticShaderFailures[NUM_SHADERS];
+    unsigned int diagnosticViewportCount;
+    D3D11_Shader diagnosticLastBoundShader;
+#endif
 
     // Rasterizers
     ID3D11RasterizerState *mainRasterizer;
@@ -567,10 +572,17 @@ static HRESULT D3D11_CreateDeviceResources(SDL_Renderer *renderer)
      * Don't forget to declare your application's minimum required feature level in its
      * description. All applications are assumed to support 11.0 unless otherwise stated.
      */
+#ifdef SDL_PLATFORM_WINRT
+    // Xbox One UWP exposes Direct3D 11 at feature level 10.1.
+    D3D_FEATURE_LEVEL featureLevels[] = {
+        D3D_FEATURE_LEVEL_10_1
+    };
+#else
     D3D_FEATURE_LEVEL featureLevels[] = {
         D3D_FEATURE_LEVEL_11_1,
         D3D_FEATURE_LEVEL_11_0
     };
+#endif
 
     D3D11_BUFFER_DESC constantBufferDesc;
     D3D11_RASTERIZER_DESC rasterDesc;
@@ -712,6 +724,10 @@ static HRESULT D3D11_CreateDeviceResources(SDL_Renderer *renderer)
         &data->featureLevel, // Returns feature level of device created.
         &d3dContext          // Returns the device immediate context.
     );
+#ifdef SDL_PLATFORM_WINRT
+    SDL_Log("[UWP_RENDER] d3d11_create_device hr=0x%08lX feature_level=0x%04X driver_type=%d flags=0x%X",
+            (unsigned long)result, (unsigned int)data->featureLevel, (int)driverType, creationFlags);
+#endif
     if (FAILED(result)) {
         WIN_SetErrorFromHRESULT("D3D11CreateDevice", result);
         goto done;
@@ -1170,6 +1186,14 @@ static HRESULT D3D11_CreateWindowSizeDependentResources(SDL_Renderer *renderer)
     }
 
     // Create a render target view of the swap chain back buffer.
+#ifdef SDL_PLATFORM_WINRT
+    {
+        D3D11_TEXTURE2D_DESC diagnosticDesc;
+        ID3D11Texture2D_GetDesc(backBuffer, &diagnosticDesc);
+        SDL_Log("[UWP_RENDER] d3d11_backbuffer requested=%dx%d actual=%ux%u format=%u rotation=%d",
+                w, h, diagnosticDesc.Width, diagnosticDesc.Height, (unsigned int)diagnosticDesc.Format, (int)data->rotation);
+    }
+#endif
     result = ID3D11Device_CreateRenderTargetView(data->d3dDevice,
                                                  (ID3D11Resource *)backBuffer,
                                                  NULL,
@@ -2266,6 +2290,20 @@ static bool D3D11_UpdateViewport(SDL_Renderer *renderer)
     d3dviewport.MaxDepth = 1.0f;
     // SDL_Log("%s: D3D viewport = {%f,%f,%f,%f}", SDL_FUNCTION, d3dviewport.TopLeftX, d3dviewport.TopLeftY, d3dviewport.Width, d3dviewport.Height);
     ID3D11DeviceContext_RSSetViewports(data->d3dContext, 1, &d3dviewport);
+#ifdef SDL_PLATFORM_WINRT
+    if (data->diagnosticViewportCount < 1200 &&
+        SDL_GetBooleanProperty(SDL_GetRendererProperties(renderer), "sf3.uwp.render_trace_frame", false)) {
+        data->diagnosticViewportCount++;
+        SDL_Log("[UWP_RENDER] d3d11_viewport target=%p rect=%g,%g,%g,%g rotation=%d "
+                "projection=%g,%g offset=%g,%g",
+                (void*)renderer->target, d3dviewport.TopLeftX, d3dviewport.TopLeftY,
+                d3dviewport.Width, d3dviewport.Height, rotation,
+                data->vertexShaderConstantsData.projectionAndView.m[0][0],
+                data->vertexShaderConstantsData.projectionAndView.m[1][1],
+                data->vertexShaderConstantsData.projectionAndView.m[3][0],
+                data->vertexShaderConstantsData.projectionAndView.m[3][1]);
+    }
+#endif
 
     data->viewportDirty = false;
 
@@ -2515,10 +2553,27 @@ static bool D3D11_SetDrawState(SDL_Renderer *renderer, const SDL_RenderCommand *
     if (shader != rendererData->currentShader) {
         if (!rendererData->pixelShaders[shader]) {
             if (!D3D11_CreatePixelShader(rendererData->d3dDevice, shader, &rendererData->pixelShaders[shader])) {
+#ifdef SDL_PLATFORM_WINRT
+                if (rendererData->diagnosticShaderFailures[shader] < 8) {
+                    rendererData->diagnosticShaderFailures[shader]++;
+                    SDL_LogError(SDL_LOG_CATEGORY_RENDER,
+                                 "[UWP_RENDER] d3d11_shader_state_failed shader=%d last_bound_shader=%d "
+                                 "feature_level=0x%04X texture_type=%g target=%p viewport=%d,%d,%d,%d "
+                                 "projection_upload_pending=%d error=%s",
+                                 (int)shader, (int)rendererData->diagnosticLastBoundShader,
+                                 (unsigned int)rendererData->featureLevel, shader_constants->texture_type,
+                                 (void*)renderer->target, rendererData->currentViewport.x,
+                                 rendererData->currentViewport.y, rendererData->currentViewport.w,
+                                 rendererData->currentViewport.h, updateSubresource, SDL_GetError());
+                }
+#endif
                 return false;
             }
         }
         ID3D11DeviceContext_PSSetShader(rendererData->d3dContext, rendererData->pixelShaders[shader], NULL, 0);
+#ifdef SDL_PLATFORM_WINRT
+        rendererData->diagnosticLastBoundShader = shader;
+#endif
         if (shader_state->constants) {
             ID3D11DeviceContext_PSSetConstantBuffers(rendererData->d3dContext, 0, 1, &shader_state->constants);
         }

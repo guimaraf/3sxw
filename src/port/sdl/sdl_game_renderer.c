@@ -14,6 +14,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#if defined(SF3_UWP)
+#include <float.h>
+#endif
 
 #define RENDER_TASK_MAX 4096
 #define TEXTURE_DESTROY_QUEUE_INITIAL_CAPACITY 1024
@@ -107,6 +110,52 @@ static int textures_to_destroy_count = 0;
 static int textures_to_destroy_capacity = 0;
 static RenderTask render_tasks[RENDER_TASK_MAX] = { 0 };
 static int render_task_count = 0;
+#if defined(SF3_UWP)
+static unsigned int uwp_texture_trace_count;
+static unsigned int uwp_geometry_error_count;
+static SDLGameRendererStats uwp_cache_stats;
+static bool uwp_texture_reuse_enabled;
+
+static void trace_uwp_geometry(void) {
+    if (!SDL_GetBooleanProperty(SDL_GetRendererProperties(_renderer), "sf3.uwp.render_trace_frame", false)) {
+        return;
+    }
+    int indexed = 0, solid = 0, nonfinite = 0;
+    float min_x = FLT_MAX, min_y = FLT_MAX;
+    float max_x = -FLT_MAX, max_y = -FLT_MAX;
+    for (int i = 0; i < render_task_count; i++) {
+        const RenderTask* task = &render_tasks[i];
+        solid += task->texture == NULL;
+        indexed += task->texture != NULL && SDL_ISPIXELFORMAT_INDEXED(task->texture->format);
+        for (int j = 0; j < 4; j++) {
+            const float x = task->vertices[j].position.x, y = task->vertices[j].position.y;
+            if (SDL_isinf(x) || SDL_isnan(x) || SDL_isinf(y) || SDL_isnan(y)) {
+                nonfinite++;
+                continue;
+            }
+            min_x = SDL_min(min_x, x);
+            min_y = SDL_min(min_y, y);
+            max_x = SDL_max(max_x, x);
+            max_y = SDL_max(max_y, y);
+        }
+        if (i < 4) {
+            SDL_Log("[UWP_RENDER] task=%d texture=%p format=%s size=%dx%d "
+                    "v0=%g,%g v3=%g,%g color=%g,%g,%g,%g",
+                    i, (void*)task->texture,
+                    task->texture ? SDL_GetPixelFormatName(task->texture->format) : "solid",
+                    task->texture ? task->texture->w : 0, task->texture ? task->texture->h : 0,
+                    task->vertices[0].position.x, task->vertices[0].position.y,
+                    task->vertices[3].position.x, task->vertices[3].position.y,
+                    task->vertices[0].color.r, task->vertices[0].color.g,
+                    task->vertices[0].color.b, task->vertices[0].color.a);
+        }
+    }
+    SDL_Log("[UWP_RENDER] geometry tasks=%d indexed=%d solid=%d nonfinite_vertices=%d bounds=%g,%g,%g,%g",
+            render_task_count, indexed, solid, nonfinite,
+            render_task_count ? min_x : 0.0, render_task_count ? min_y : 0.0,
+            render_task_count ? max_x : 0.0, render_task_count ? max_y : 0.0);
+}
+#endif
 static int texture_cache_miss_count = 0;
 static int texture_cache_miss_first_use_count = 0;
 static int texture_cache_miss_after_palette_unlock_count = 0;
@@ -333,6 +382,15 @@ static bool is_indexed_surface(const SDL_Surface* surface) {
 
 static bool should_record_texture_diagnostics() {
     return DebugLog_IsEnabled() && debug_indexed_texture_path_enabled;
+}
+
+/* Reuse is independent of the expensive desktop diagnostic tables on UWP. */
+static bool indexed_texture_reuse_enabled() {
+#if defined(SF3_UWP)
+    return uwp_texture_reuse_enabled;
+#else
+    return should_record_texture_diagnostics();
+#endif
 }
 
 static bool ensure_texture_handle_stats() {
@@ -729,6 +787,9 @@ static bool update_indexed_streaming_texture(SDL_Texture* texture, const SDL_Sur
     indexed_texture_update_count += 1;
     indexed_texture_update_pixel_count += surface->w * surface->h;
     indexed_texture_update_ms += elapsed_ms(update_start_ns, update_end_ns);
+#if defined(SF3_UWP)
+    uwp_cache_stats.upload_bytes += (Uint64)surface->w * surface->h * 4;
+#endif
     return true;
 }
 
@@ -760,6 +821,9 @@ static bool update_indexed_texture_pixels(SDL_Texture* texture, const SDL_Surfac
     indexed_texture_update_count += 1;
     indexed_texture_update_pixel_count += surface->w * surface->h;
     indexed_texture_update_ms += elapsed_ms(update_start_ns, update_end_ns);
+#if defined(SF3_UWP)
+    uwp_cache_stats.upload_bytes += (Uint64)surface->w * surface->h;
+#endif
     return true;
 }
 
@@ -853,11 +917,11 @@ static SDL_Texture* create_experimental_indexed_texture(int texture_index,
 }
 
 static bool should_use_experimental_indexed_texture(const SDL_Surface* surface, const SDL_Palette* palette) {
-    return should_record_texture_diagnostics() && is_indexed_surface(surface) && palette != NULL;
+    return indexed_texture_reuse_enabled() && is_indexed_surface(surface) && palette != NULL;
 }
 
 static void mark_experimental_textures_dirty_for_palette(int palette_handle) {
-    if (!should_record_texture_diagnostics() || !is_valid_palette_handle(palette_handle)) {
+    if (!indexed_texture_reuse_enabled() || !is_valid_palette_handle(palette_handle)) {
         return;
     }
 
@@ -877,7 +941,7 @@ static void mark_experimental_textures_dirty_for_palette(int palette_handle) {
 }
 
 static void mark_experimental_textures_dirty_for_texture(int texture_handle) {
-    if (!should_record_texture_diagnostics() || !is_valid_texture_handle(texture_handle)) {
+    if (!indexed_texture_reuse_enabled() || !is_valid_texture_handle(texture_handle)) {
         return;
     }
 
@@ -907,6 +971,15 @@ static bool update_cached_experimental_indexed_texture(SDL_Texture* texture,
                                                        int texture_index,
                                                        int palette_handle) {
     const TextureCacheMode mode = texture_cache_mode[texture_index][palette_handle];
+#if defined(SF3_UWP)
+    /* A retained slot can acquire new dimensions/format when the game rewrites it. */
+    if (!is_indexed_surface(surface) || palette == NULL ||
+        texture->w != surface->w || texture->h != surface->h ||
+        (mode == TEXTURE_CACHE_MODE_PALETTIZED && texture->format != indexed_texture_upload_format(surface))) {
+        uwp_cache_stats.resize_recreates++;
+        return false;
+    }
+#endif
 
     if (mode == TEXTURE_CACHE_MODE_PALETTIZED) {
         if (texture_cache_pixels_dirty[texture_index][palette_handle] && !update_indexed_texture_pixels(texture, surface)) {
@@ -935,6 +1008,9 @@ static SDL_Texture* create_texture_for_cache(const SDL_Surface* surface,
                                              int palette_handle,
                                              const SDL_Palette* palette,
                                              TextureCacheMode* texture_mode) {
+#if defined(SF3_UWP)
+    const Uint64 create_start_ns = SDL_GetTicksNS();
+#endif
     SDL_Texture* texture = NULL;
     *texture_mode = TEXTURE_CACHE_MODE_DEFAULT;
 
@@ -948,6 +1024,26 @@ static SDL_Texture* create_texture_for_cache(const SDL_Surface* surface,
         SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
         SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
     }
+
+#if defined(SF3_UWP)
+    uwp_cache_stats.texture_create_calls++;
+    uwp_cache_stats.texture_create_failures += texture == NULL;
+    uwp_cache_stats.texture_create_ms += (double)(SDL_GetTicksNS() - create_start_ns) / 1e6;
+    if ((Uint64)surface->w * surface->h >
+        (Uint64)uwp_cache_stats.largest_create_w * uwp_cache_stats.largest_create_h) {
+        uwp_cache_stats.largest_create_w = surface->w;
+        uwp_cache_stats.largest_create_h = surface->h;
+    }
+    if (uwp_texture_trace_count < 160 && (texture == NULL ||
+        SDL_GetHintBoolean("SF3_UWP_VERBOSE_RENDER_TRACE", false))) {
+        uwp_texture_trace_count++;
+        SDL_Log("[UWP_RENDER] texture_create handle=%d palette=%d source_format=%s source=%dx%d "
+                "texture=%p gpu_format=%s mode=%d error=%s",
+                texture_index + 1, palette_handle, SDL_GetPixelFormatName(surface->format), surface->w, surface->h,
+                (void*)texture, texture ? SDL_GetPixelFormatName(texture->format) : "failed",
+                (int)*texture_mode, texture ? "none" : SDL_GetError());
+    }
+#endif
 
     return texture;
 }
@@ -1009,6 +1105,10 @@ static void lerp_fcolors(SDL_FColor* dest, const SDL_FColor* a, const SDL_FColor
 
 bool SDLGameRenderer_Init(SDL_Renderer* renderer) {
     _renderer = renderer;
+#if defined(SF3_UWP)
+    uwp_texture_reuse_enabled = SDL_GetHintBoolean("SF3_UWP_TEXTURE_REUSE", true);
+    SDL_Log("[UWP_RENDER] texture_reuse enabled=%d snapshot_protection=1", uwp_texture_reuse_enabled);
+#endif
     cps3_canvas =
         SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, cps3_width, cps3_height);
 
@@ -1188,12 +1288,16 @@ void SDLGameRenderer_WriteDebugTextureHandleStats() {
 }
 
 void SDLGameRenderer_BeginFrame() {
+#if defined(SF3_UWP)
+    SDL_zero(uwp_cache_stats);
+    reset_texture_diagnostics();
+#endif
     if (DebugLog_IsEnabled()) {
         texture_cache_miss_count = 0;
         reset_texture_diagnostics();
     }
 
-    if (debug_indexed_texture_path_enabled) {
+    if (debug_indexed_texture_path_enabled || indexed_texture_reuse_enabled()) {
         SDL_zeroa(texture_cache_used_this_frame);
     }
 
@@ -1218,6 +1322,9 @@ void SDLGameRenderer_RenderFrame(SDLGameRendererStats* stats) {
 
     if (stats != NULL) {
         SDL_zero(*stats);
+#if defined(SF3_UWP)
+        *stats = uwp_cache_stats;
+#endif
         stats->render_tasks = render_task_count;
         stats->texture_cache_misses = texture_cache_miss_count;
         stats->texture_cache_misses_first_use = texture_cache_miss_first_use_count;
@@ -1240,6 +1347,9 @@ void SDLGameRenderer_RenderFrame(SDLGameRendererStats* stats) {
 
     const Uint64 sort_start_ns = stats != NULL ? SDL_GetTicksNS() : 0;
     qsort(render_tasks, render_task_count, sizeof(RenderTask), compare_render_tasks);
+#if defined(SF3_UWP)
+    trace_uwp_geometry();
+#endif
 
     if (stats != NULL) {
         const Uint64 sort_end_ns = SDL_GetTicksNS();
@@ -1250,7 +1360,15 @@ void SDLGameRenderer_RenderFrame(SDLGameRendererStats* stats) {
     for (int i = 0; i < render_task_count; i++) {
         const RenderTask* task = &render_tasks[i];
         const int indices[] = { 0, 1, 2, 1, 2, 3 };
+#if defined(SF3_UWP)
+        if (!SDL_RenderGeometry(_renderer, task->texture, task->vertices, 4, indices, 6) &&
+            uwp_geometry_error_count < 16) {
+            uwp_geometry_error_count++;
+            SDL_Log("[UWP_RENDER] geometry_queue_failed task=%d error=%s", i, SDL_GetError());
+        }
+#else
         SDL_RenderGeometry(_renderer, task->texture, task->vertices, 4, indices, 6);
+#endif
 
         if (stats != NULL) {
             stats->geometry_calls += 1;
@@ -1293,6 +1411,9 @@ void SDLGameRenderer_UnlockPalette(unsigned int ph) {
     const int palette_handle = ph;
 
     if (is_valid_palette_handle(palette_handle)) {
+#if defined(SF3_UWP)
+        uwp_cache_stats.unlock_palette_calls++;
+#endif
         if (should_record_texture_diagnostics()) {
             palette_unlock_count += 1;
             ensure_texture_handle_stats();
@@ -1311,6 +1432,9 @@ void SDLGameRenderer_UnlockTexture(unsigned int th) {
     const int texture_handle = th;
 
     if (is_valid_texture_handle(texture_handle)) {
+#if defined(SF3_UWP)
+        uwp_cache_stats.unlock_texture_calls++;
+#endif
         if (should_record_texture_diagnostics()) {
             texture_unlock_count += 1;
             ensure_texture_handle_stats();
@@ -1410,9 +1534,20 @@ void SDLGameRenderer_DestroyTexture(unsigned int texture_handle) {
         if (active_texture_invalidation_reason == TEXTURE_CACHE_INVALIDATION_TEXTURE_UNLOCK &&
             texture_cache_mode[texture_index][i] != TEXTURE_CACHE_MODE_DEFAULT &&
             !texture_cache_used_this_frame[texture_index][i]) {
+#if defined(SF3_UWP)
+            uwp_cache_stats.retained_on_unlock++;
+#endif
             continue;
         }
 
+#if defined(SF3_UWP)
+        if (active_texture_invalidation_reason == TEXTURE_CACHE_INVALIDATION_TEXTURE_UNLOCK) {
+            uwp_cache_stats.cache_pixel_invalidations++;
+            uwp_cache_stats.snapshot_invalidations += texture_cache_mode[texture_index][i] != TEXTURE_CACHE_MODE_DEFAULT;
+        } else {
+            uwp_cache_stats.cache_release_invalidations++;
+        }
+#endif
         push_texture_to_destroy(*texture_p);
         *texture_p = NULL;
         texture_cache_mode[texture_index][i] = TEXTURE_CACHE_MODE_DEFAULT;
@@ -1533,9 +1668,20 @@ void SDLGameRenderer_DestroyPalette(unsigned int palette_handle) {
         if (active_palette_invalidation_reason == TEXTURE_CACHE_INVALIDATION_PALETTE_UNLOCK &&
             texture_cache_mode[i][palette_handle] != TEXTURE_CACHE_MODE_DEFAULT &&
             !texture_cache_used_this_frame[i][palette_handle]) {
+#if defined(SF3_UWP)
+            uwp_cache_stats.retained_on_unlock++;
+#endif
             continue;
         }
 
+#if defined(SF3_UWP)
+        if (active_palette_invalidation_reason == TEXTURE_CACHE_INVALIDATION_PALETTE_UNLOCK) {
+            uwp_cache_stats.cache_palette_invalidations++;
+            uwp_cache_stats.snapshot_invalidations += texture_cache_mode[i][palette_handle] != TEXTURE_CACHE_MODE_DEFAULT;
+        } else {
+            uwp_cache_stats.cache_release_invalidations++;
+        }
+#endif
         push_texture_to_destroy(*texture_p);
         *texture_p = NULL;
         texture_cache_mode[i][palette_handle] = TEXTURE_CACHE_MODE_DEFAULT;
@@ -1590,6 +1736,9 @@ void SDLGameRenderer_SetTexture(unsigned int th) {
     const SDL_Texture* cached_texture = texture_cache[texture_index][palette_handle];
 
     if (cached_texture != NULL) {
+#if defined(SF3_UWP)
+        uwp_cache_stats.cache_hits++;
+#endif
         texture = cached_texture;
         record_texture_cache_access(texture_index, palette_handle, true);
 

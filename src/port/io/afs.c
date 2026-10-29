@@ -510,7 +510,11 @@ void AFS_ReadSync(AFSHandle handle, int sectors, void* buf) {
     printf("📂 %d: read sync\n", handle);
 #endif
 
+#if defined(SF3_UWP)
+    const Uint64 start_ns = SDL_GetTicksNS();
+#else
     const Uint64 start_ns = DebugLog_IsEnabled() ? SDL_GetTicksNS() : 0;
+#endif
     AFS_Read(handle, sectors, buf);
 
     if (!is_valid_handle(handle) || requests[handle].state == AFS_READ_STATE_ERROR) {
@@ -535,6 +539,22 @@ void AFS_ReadSync(AFSHandle handle, int sectors, void* buf) {
         }
     }
 
+#if defined(SF3_UWP)
+    const double sync_read_ms = (double)(SDL_GetTicksNS() - start_ns) / 1e6;
+    if (sync_read_ms > 2.0) {
+        static SDL_AtomicInt slow_read_count;
+        const int detail = SDL_AddAtomicInt(&slow_read_count, 1);
+        if (detail < 64) {
+            SDL_Log("[UWP_PERF] afs_sync thread=%llu file=%d sectors=%d elapsed_ms=%.3f "
+                    "read_completed=%d state=%d close_pending=%d",
+                    (unsigned long long)SDL_GetCurrentThreadID(), requests[handle].file_num,
+                    sectors, sync_read_ms, read_completed, (int)requests[handle].state,
+                    requests[handle].close_pending);
+        } else if (detail == 64) {
+            SDL_Log("[UWP_PERF] afs_sync detail_limit=64 further_slow_reads_not_logged=1");
+        }
+    }
+#endif
     if (DebugLog_IsEnabled()) {
         const ReadRequest* request = &requests[handle];
         DebugLog_RecordAfsSyncRead(

@@ -17,6 +17,14 @@
 #include <SDL3/SDL.h>
 #include <limits.h>
 
+#if defined(SF3_UWP)
+#include "port/paths.h"
+#include "sf33rd/Source/Game/engine/workuser.h"
+#include "sf33rd/Source/Game/engine/plcnt.h"
+#include "sf33rd/Source/Game/stage/bg.h"
+#include "sf33rd/Source/Game/system/work_sys.h"
+#endif
+
 typedef enum ScaleMode {
     SCALEMODE_NEAREST,
     SCALEMODE_LINEAR,
@@ -43,6 +51,419 @@ static Uint64 target_frame_time_ns = 1000000000.0 / 59.59949;
 static Uint64 frame_deadline = 0;
 
 static bool should_save_screenshot = false;
+
+#if defined(SF3_UWP)
+#define UWP_RENDER_LOG_BUFFER_SIZE 4096
+
+typedef struct UWPRenderLogCapture {
+    char messages[UWP_RENDER_LOG_BUFFER_SIZE];
+    SDL_LogOutputFunction previous_output;
+    void* previous_userdata;
+} UWPRenderLogCapture;
+
+static UWPRenderLogCapture uwp_render_log_capture;
+static char uwp_window_renderer_error[1024];
+
+static SDL_IOStream* uwp_render_trace_file;
+static SDL_Mutex* uwp_render_trace_mutex;
+static SDL_LogOutputFunction uwp_trace_previous_output;
+static void* uwp_trace_previous_userdata;
+static size_t uwp_render_trace_bytes;
+static Uint64 uwp_render_trace_frame;
+static bool uwp_render_trace_sample;
+static unsigned int uwp_render_trace_samples;
+#define UWP_TRACE_QUEUE_CAPACITY 128
+#define UWP_TRACE_LINE_SIZE 4096
+#define UWP_TRACE_LIMIT (4 * 1024 * 1024)
+static char uwp_trace_queue[UWP_TRACE_QUEUE_CAPACITY][UWP_TRACE_LINE_SIZE];
+static unsigned int uwp_trace_head, uwp_trace_count, uwp_trace_high_water;
+static SDL_Condition* uwp_trace_condition;
+static SDL_Thread* uwp_trace_thread;
+static SDL_AtomicInt uwp_trace_dropped;
+static bool uwp_trace_stop;
+static bool uwp_trace_verbose;
+static SDL_ThreadID uwp_trace_main_thread;
+static Uint64 uwp_frame_start_ns, uwp_previous_frame_start_ns;
+static double uwp_frame_interval_ms, uwp_pre_render_ms;
+
+/* Only the worker touches the stream. Never hold the queue lock during disk I/O. */
+static int uwp_render_trace_worker(void* userdata) {
+    (void)userdata;
+    SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_LOW);
+    char header[512];
+    SDL_snprintf(header, sizeof(header),
+        "ticks_ms=%llu [UWP_RENDER] session build=%s %s SDL_headers=%d SDL_runtime=%d "
+        "render_trace_version=4 limit_bytes=4194304 async_log=1 verbose=%d "
+        "logical_cpus=%d main_thread=%llu log_worker=%llu\n",
+        (unsigned long long)SDL_GetTicks(), __DATE__, __TIME__, SDL_VERSION, SDL_GetVersion(),
+        uwp_trace_verbose, SDL_GetNumLogicalCPUCores(), (unsigned long long)uwp_trace_main_thread,
+        (unsigned long long)SDL_GetCurrentThreadID());
+    const size_t header_length = SDL_strlen(header);
+    uwp_render_trace_bytes = SDL_WriteIO(uwp_render_trace_file, header, header_length);
+    Uint64 last_flush = SDL_GetTicks(), last_status = last_flush;
+    double max_flush_ms = 0.0;
+    unsigned int io_errors = uwp_render_trace_bytes != header_length, capped_lines = 0;
+    for (;;) {
+        char batch[4][UWP_TRACE_LINE_SIZE];
+        unsigned int count = 0, high_water;
+        SDL_LockMutex(uwp_render_trace_mutex);
+        if (uwp_trace_count == 0 && !uwp_trace_stop) {
+            SDL_WaitConditionTimeout(uwp_trace_condition, uwp_render_trace_mutex, 250);
+        }
+        while (count < SDL_arraysize(batch) && uwp_trace_count != 0) {
+            SDL_strlcpy(batch[count++], uwp_trace_queue[uwp_trace_head], UWP_TRACE_LINE_SIZE);
+            uwp_trace_head = (uwp_trace_head + 1) % UWP_TRACE_QUEUE_CAPACITY;
+            uwp_trace_count--;
+        }
+        const bool done = uwp_trace_stop && uwp_trace_count == 0;
+        high_water = uwp_trace_high_water;
+        SDL_UnlockMutex(uwp_render_trace_mutex);
+        for (unsigned int i = 0; i < count; i++) {
+            const size_t length = SDL_strlen(batch[i]);
+            if (uwp_render_trace_bytes + length > UWP_TRACE_LIMIT - 1024) {
+                capped_lines++;
+                continue;
+            }
+            const size_t written = SDL_WriteIO(uwp_render_trace_file, batch[i], length);
+            uwp_render_trace_bytes += written;
+            io_errors += written != length;
+        }
+        const Uint64 now = SDL_GetTicks();
+        if (done || now - last_status >= 5000) {
+            char status[512];
+            SDL_snprintf(status, sizeof(status),
+                "ticks_ms=%llu [UWP_LOG] shutdown=%d dropped=%d queue_high_water=%u capacity=%d "
+                "bytes=%llu capped_lines=%u io_errors=%u max_flush_ms=%.3f\n",
+                (unsigned long long)now, done, SDL_GetAtomicInt(&uwp_trace_dropped), high_water,
+                UWP_TRACE_QUEUE_CAPACITY, (unsigned long long)uwp_render_trace_bytes,
+                capped_lines, io_errors, max_flush_ms);
+            if (uwp_render_trace_bytes + SDL_strlen(status) <= UWP_TRACE_LIMIT - (done ? 0 : 512)) {
+                const size_t length = SDL_strlen(status);
+                const size_t written = SDL_WriteIO(uwp_render_trace_file, status, length);
+                uwp_render_trace_bytes += written;
+                io_errors += written != length;
+            }
+            last_status = now;
+        }
+        if (done || now - last_flush >= 1000) {
+            const Uint64 start = SDL_GetTicksNS();
+            io_errors += !SDL_FlushIO(uwp_render_trace_file);
+            max_flush_ms = SDL_max(max_flush_ms, (double)(SDL_GetTicksNS() - start) / 1e6);
+            last_flush = SDL_GetTicks();
+        }
+        if (done) {
+            break;
+        }
+    }
+    return 0;
+}
+
+static bool trace_uwp_render_result(bool success, const char* operation) {
+    static unsigned int errors;
+    if (!success && errors < 32) {
+        errors++;
+        SDL_Log("[UWP_RENDER] frame=%llu operation_failed=%s error=%s",
+                (unsigned long long)uwp_render_trace_frame, operation, SDL_GetError());
+    }
+    return success;
+}
+#define UWP_RENDER_CALL(call) trace_uwp_render_result((call), #call)
+
+static void SDLCALL write_uwp_render_trace(void* userdata, int category,
+                                         SDL_LogPriority priority, const char* message) {
+    (void)userdata;
+    if (message != NULL && (SDL_strstr(message, "[UWP_RENDER]") != NULL ||
+        SDL_strstr(message, "[UWP_PERF]") != NULL ||
+        ((category == SDL_LOG_CATEGORY_RENDER || category == SDL_LOG_CATEGORY_VIDEO) &&
+         priority >= SDL_LOG_PRIORITY_WARN))) {
+        char line[4096];
+        SDL_snprintf(line, sizeof(line), "ticks_ms=%llu category=%d priority=%d %s\n",
+                     (unsigned long long)SDL_GetTicks(), category, (int)priority, message);
+        if (!SDL_TryLockMutex(uwp_render_trace_mutex)) {
+            SDL_AddAtomicInt(&uwp_trace_dropped, 1);
+            return;
+        }
+        if (uwp_trace_count < UWP_TRACE_QUEUE_CAPACITY) {
+            const unsigned int tail = (uwp_trace_head + uwp_trace_count) % UWP_TRACE_QUEUE_CAPACITY;
+            SDL_strlcpy(uwp_trace_queue[tail], line, UWP_TRACE_LINE_SIZE);
+            uwp_trace_count++;
+            uwp_trace_high_water = SDL_max(uwp_trace_high_water, uwp_trace_count);
+            SDL_SignalCondition(uwp_trace_condition);
+        } else {
+            SDL_AddAtomicInt(&uwp_trace_dropped, 1);
+        }
+        SDL_UnlockMutex(uwp_render_trace_mutex);
+        /* OutputDebugString is also synchronous; don't forward captured diagnostics. */
+        return;
+    }
+    if (uwp_trace_previous_output != NULL) {
+        uwp_trace_previous_output(uwp_trace_previous_userdata, category, priority, message);
+    }
+}
+
+static void init_uwp_render_trace(void) {
+    const char* directory = Paths_GetDataPath();
+    char* path = NULL;
+    if (directory == NULL || SDL_asprintf(&path, "%suwp_render_check.log", directory) < 0) {
+        return;
+    }
+    uwp_render_trace_mutex = SDL_CreateMutex();
+    uwp_trace_condition = SDL_CreateCondition();
+    if (uwp_render_trace_mutex != NULL && uwp_trace_condition != NULL) {
+        uwp_render_trace_file = SDL_IOFromFile(path, "wb");
+    }
+    SDL_free(path);
+    if (uwp_render_trace_file == NULL) {
+        SDL_DestroyCondition(uwp_trace_condition);
+        uwp_trace_condition = NULL;
+        SDL_DestroyMutex(uwp_render_trace_mutex);
+        uwp_render_trace_mutex = NULL;
+        SDL_Log("Couldn't open the UWP render diagnostic: %s", SDL_GetError());
+        return;
+    }
+    uwp_render_trace_bytes = 0;
+    uwp_render_trace_frame = 0;
+    uwp_render_trace_samples = 0;
+    uwp_trace_head = uwp_trace_count = uwp_trace_high_water = 0;
+    SDL_SetAtomicInt(&uwp_trace_dropped, 0);
+    uwp_trace_stop = false;
+    uwp_trace_verbose = SDL_GetHintBoolean("SF3_UWP_VERBOSE_RENDER_TRACE", false);
+    uwp_trace_main_thread = SDL_GetCurrentThreadID();
+    uwp_trace_thread = SDL_CreateThread(uwp_render_trace_worker, "UWP Diagnostic Writer", NULL);
+    if (uwp_trace_thread == NULL) {
+        SDL_CloseIO(uwp_render_trace_file);
+        uwp_render_trace_file = NULL;
+        SDL_DestroyCondition(uwp_trace_condition);
+        uwp_trace_condition = NULL;
+        SDL_DestroyMutex(uwp_render_trace_mutex);
+        uwp_render_trace_mutex = NULL;
+        SDL_Log("Couldn't start the UWP diagnostic worker: %s", SDL_GetError());
+        return;
+    }
+    SDL_GetLogOutputFunction(&uwp_trace_previous_output, &uwp_trace_previous_userdata);
+    SDL_SetLogOutputFunction(write_uwp_render_trace, NULL);
+}
+
+static void trace_uwp_target(const char* stage) {
+    if (!uwp_render_trace_sample) {
+        return;
+    }
+    SDL_Texture* target = SDL_GetRenderTarget(renderer);
+    SDL_Rect viewport = { 0 }, clip = { 0 };
+    int current_w = 0, current_h = 0, logical_w = 0, logical_h = 0;
+    float scale_x = 0, scale_y = 0;
+    SDL_RendererLogicalPresentation logical_mode = SDL_LOGICAL_PRESENTATION_DISABLED;
+    const bool size_ok = SDL_GetCurrentRenderOutputSize(renderer, &current_w, &current_h);
+    const bool viewport_ok = SDL_GetRenderViewport(renderer, &viewport);
+    const bool clip_ok = SDL_GetRenderClipRect(renderer, &clip);
+    const bool scale_ok = SDL_GetRenderScale(renderer, &scale_x, &scale_y);
+    const bool logical_ok = SDL_GetRenderLogicalPresentation(renderer, &logical_w, &logical_h, &logical_mode);
+    SDL_Log("[UWP_RENDER] frame=%llu stage=%s target=%p target_size=%dx%d "
+            "current=%dx%d viewport=%d,%d,%d,%d scale=%g,%g "
+            "clip_enabled=%d clip=%d,%d,%d,%d logical=%dx%d mode=%d queries_ok=%d%d%d%d%d",
+            (unsigned long long)uwp_render_trace_frame, stage, (void*)target,
+            target ? target->w : 0, target ? target->h : 0, current_w, current_h,
+            viewport.x, viewport.y, viewport.w, viewport.h, scale_x, scale_y,
+            SDL_RenderClipEnabled(renderer), clip.x, clip.y, clip.w, clip.h,
+            logical_w, logical_h, (int)logical_mode, size_ok, viewport_ok, clip_ok, scale_ok, logical_ok);
+}
+
+static void begin_uwp_render_sample(void) {
+    static u8 previous_state[8];
+    static bool state_known;
+    static unsigned int followup_frames;
+    u8 state[8];
+    SDL_memcpy(state, G_No, 4);
+    SDL_memcpy(state + 4, D_No, 4);
+    const bool changed = !state_known || SDL_memcmp(state, previous_state, sizeof(state)) != 0;
+    if (changed) {
+        SDL_memcpy(previous_state, state, sizeof(state));
+        state_known = true;
+        followup_frames = 3;
+    }
+    uwp_render_trace_frame++;
+    if (changed && uwp_trace_thread != NULL) {
+        SDL_Log("[UWP_PERF] state frame=%llu G=%u,%u,%u,%u D=%u,%u,%u,%u "
+                "stage=%d area=%d p1=%d p2=%d bg_x=%d p1_x=%d p2_x=%d",
+                (unsigned long long)uwp_render_trace_frame,
+                G_No[0], G_No[1], G_No[2], G_No[3], D_No[0], D_No[1], D_No[2], D_No[3],
+                bg_w.stage, bg_w.area, plw[0].player_number, plw[1].player_number,
+                bg_w.bgw[1].wxy[0].disp.pos, plw[0].wu.xyz[0].disp.pos, plw[1].wu.xyz[0].disp.pos);
+    }
+    uwp_render_trace_sample = uwp_trace_verbose && uwp_trace_thread != NULL && uwp_render_trace_samples < 160 &&
+        (changed || followup_frames > 0 || uwp_render_trace_frame % 300 == 0);
+    SDL_SetBooleanProperty(SDL_GetRendererProperties(renderer), "sf3.uwp.render_trace_frame", uwp_render_trace_sample);
+    if (!uwp_render_trace_sample) {
+        return;
+    }
+    uwp_render_trace_samples++;
+    if (followup_frames > 0) {
+        followup_frames--;
+    }
+    int window_w = 0, window_h = 0, pixel_w = 0, pixel_h = 0, output_w = 0, output_h = 0;
+    SDL_GetWindowSize(window, &window_w, &window_h);
+    SDL_GetWindowSizeInPixels(window, &pixel_w, &pixel_h);
+    SDL_GetRenderOutputSize(renderer, &output_w, &output_h);
+    SDL_Log("[UWP_RENDER] frame=%llu state_changed=%d G=%u,%u,%u,%u D=%u,%u,%u,%u "
+            "scr_sc=%g renderer=%s window=%dx%d pixels=%dx%d output=%dx%d "
+            "screen=%dx%d scale_mode=%d stretch=%d",
+            (unsigned long long)uwp_render_trace_frame, changed,
+            G_No[0], G_No[1], G_No[2], G_No[3], D_No[0], D_No[1], D_No[2], D_No[3],
+            scr_sc, SDL_GetRendererName(renderer), window_w, window_h, pixel_w, pixel_h,
+            output_w, output_h, screen_texture ? screen_texture->w : 0,
+            screen_texture ? screen_texture->h : 0, (int)scale_mode, stretch_aspect_ratio);
+}
+
+/* Fixed-size aggregates: no per-frame allocations or synchronous file operations. */
+static void log_uwp_cache_stats(const char* kind, const SDLGameRendererStats* stats) {
+    SDL_Log("[UWP_PERF] cache kind=%s frame=%llu stage=%d area=%d p1=%d p2=%d "
+            "bg_x=%d p1_x=%d p2_x=%d hits=%d retained=%d snapshot_invalidations=%d resize_recreates=%d "
+            "palette_invalidations=%d pixel_invalidations=%d release_invalidations=%d "
+            "palette_unlocks=%d texture_unlocks=%d pixel_updates=%d updated_pixels=%d "
+            "pixel_update_ms=%.3f palette_updates=%d palette_update_ms=%.3f "
+            "upload_bytes=%llu rgba_fallbacks=%d largest_create=%dx%d",
+            kind, (unsigned long long)uwp_render_trace_frame, bg_w.stage, bg_w.area,
+            plw[0].player_number, plw[1].player_number, bg_w.bgw[1].wxy[0].disp.pos,
+            plw[0].wu.xyz[0].disp.pos, plw[1].wu.xyz[0].disp.pos,
+            stats->cache_hits, stats->retained_on_unlock, stats->snapshot_invalidations,
+            stats->resize_recreates, stats->cache_palette_invalidations, stats->cache_pixel_invalidations,
+            stats->cache_release_invalidations, stats->unlock_palette_calls, stats->unlock_texture_calls,
+            stats->indexed_texture_updates, stats->indexed_texture_update_pixels,
+            stats->indexed_texture_update_ms, stats->indexed_palette_updates, stats->indexed_palette_update_ms,
+            (unsigned long long)stats->upload_bytes, stats->indexed_texture_rgba_fallbacks,
+            stats->largest_create_w, stats->largest_create_h);
+}
+
+static void record_uwp_frame_perf(const SDLAppFrameTiming* timing, double work_ms) {
+    static SDLGameRendererStats cache_window;
+#define UWP_ADD_CACHE_COUNTER(field) cache_window.field += timing->render_stats.field
+    UWP_ADD_CACHE_COUNTER(cache_hits);
+    UWP_ADD_CACHE_COUNTER(retained_on_unlock);
+    UWP_ADD_CACHE_COUNTER(snapshot_invalidations);
+    UWP_ADD_CACHE_COUNTER(resize_recreates);
+    UWP_ADD_CACHE_COUNTER(cache_palette_invalidations);
+    UWP_ADD_CACHE_COUNTER(cache_pixel_invalidations);
+    UWP_ADD_CACHE_COUNTER(cache_release_invalidations);
+    UWP_ADD_CACHE_COUNTER(unlock_palette_calls);
+    UWP_ADD_CACHE_COUNTER(unlock_texture_calls);
+    UWP_ADD_CACHE_COUNTER(indexed_texture_updates);
+    UWP_ADD_CACHE_COUNTER(indexed_texture_update_pixels);
+    UWP_ADD_CACHE_COUNTER(indexed_palette_updates);
+    UWP_ADD_CACHE_COUNTER(indexed_texture_rgba_fallbacks);
+    UWP_ADD_CACHE_COUNTER(upload_bytes);
+#undef UWP_ADD_CACHE_COUNTER
+    cache_window.indexed_texture_update_ms = SDL_max(cache_window.indexed_texture_update_ms,
+                                                    timing->render_stats.indexed_texture_update_ms);
+    cache_window.indexed_palette_update_ms = SDL_max(cache_window.indexed_palette_update_ms,
+                                                    timing->render_stats.indexed_palette_update_ms);
+    if ((Uint64)timing->render_stats.largest_create_w * timing->render_stats.largest_create_h >
+        (Uint64)cache_window.largest_create_w * cache_window.largest_create_h) {
+        cache_window.largest_create_w = timing->render_stats.largest_create_w;
+        cache_window.largest_create_h = timing->render_stats.largest_create_h;
+    }
+    static unsigned int frames, over_20, over_33, slow_details, texture_creates, texture_failures;
+    static unsigned int intervals, intervals_over_20, intervals_over_33;
+    static double total_interval_ms;
+    static double total_ms, max_frame_ms, max_interval_ms, max_work_ms, max_pre_render_ms;
+    static double max_adx_ms, max_geometry_ms, max_copy_ms, max_present_ms, max_cleanup_ms;
+    static double max_create_ms, max_sleep_overrun_ms;
+    const double frame_ms = (double)(SDL_GetTicksNS() - uwp_frame_start_ns) / 1e6;
+    frames++;
+    total_ms += frame_ms;
+    if (uwp_frame_interval_ms > 0.0) {
+        intervals++;
+        total_interval_ms += uwp_frame_interval_ms;
+        intervals_over_20 += uwp_frame_interval_ms > 20.0;
+        intervals_over_33 += uwp_frame_interval_ms > 33.333;
+    }
+    over_20 += frame_ms > 20.0;
+    over_33 += frame_ms > 33.333;
+    max_frame_ms = SDL_max(max_frame_ms, frame_ms);
+    max_interval_ms = SDL_max(max_interval_ms, uwp_frame_interval_ms);
+    max_work_ms = SDL_max(max_work_ms, work_ms);
+    max_pre_render_ms = SDL_max(max_pre_render_ms, uwp_pre_render_ms);
+    max_adx_ms = SDL_max(max_adx_ms, timing->adx_process_ms);
+    max_geometry_ms = SDL_max(max_geometry_ms, timing->game_renderer_render_ms);
+    max_copy_ms = SDL_max(max_copy_ms, timing->screen_copy_ms);
+    max_present_ms = SDL_max(max_present_ms, timing->present_ms);
+    max_cleanup_ms = SDL_max(max_cleanup_ms, timing->cleanup_ms);
+    max_create_ms = SDL_max(max_create_ms, timing->render_stats.texture_create_ms);
+    max_sleep_overrun_ms = SDL_max(max_sleep_overrun_ms, timing->sleep_overrun_ms);
+    texture_creates += timing->render_stats.texture_create_calls;
+    texture_failures += timing->render_stats.texture_create_failures;
+    if (frame_ms > 20.0 || uwp_frame_interval_ms > 20.0) {
+        slow_details++;
+        if (slow_details <= 8) {
+            SDL_Log("[UWP_PERF] slow frame=%llu G=%u,%u,%u,%u D=%u,%u,%u,%u "
+                    "frame_ms=%.3f previous_begin_interval_ms=%.3f work_ms=%.3f pre_render_ms=%.3f "
+                    "adx_ms=%.3f geometry_ms=%.3f copy_ms=%.3f present_ms=%.3f cleanup_ms=%.3f "
+                    "sleep_ms=%.3f sleep_overrun_ms=%.3f screenshot_ms=%.3f "
+                    "tasks=%d creates=%d create_ms=%.3f create_failures=%d audio_queued_bytes=%d audio_files=%d",
+                    (unsigned long long)uwp_render_trace_frame,
+                    G_No[0], G_No[1], G_No[2], G_No[3], D_No[0], D_No[1], D_No[2], D_No[3],
+                    frame_ms, uwp_frame_interval_ms, work_ms, uwp_pre_render_ms,
+                    timing->adx_process_ms, timing->game_renderer_render_ms, timing->screen_copy_ms,
+                    timing->present_ms, timing->cleanup_ms, timing->sleep_ms, timing->sleep_overrun_ms,
+                    timing->screenshot_ms, timing->render_stats.render_tasks,
+                    timing->render_stats.texture_create_calls, timing->render_stats.texture_create_ms,
+                    timing->render_stats.texture_create_failures, ADX_GetQueuedBytes(), ADX_GetNumFiles());
+            log_uwp_cache_stats("slow", &timing->render_stats);
+        }
+    }
+    if (frames == 120) {
+        SDL_Log("[UWP_PERF] window end_frame=%llu frames=%u target_ms=%.3f avg_frame_ms=%.3f "
+                "max_frame_ms=%.3f over_20ms=%u over_33ms=%u slow_details_omitted=%u "
+                "avg_begin_interval_ms=%.3f max_begin_interval_ms=%.3f begin_intervals=%u "
+                "begin_over_20ms=%u begin_over_33ms=%u max_work_ms=%.3f max_pre_render_ms=%.3f "
+                "max_adx_ms=%.3f max_geometry_ms=%.3f max_copy_ms=%.3f max_present_ms=%.3f "
+                "max_cleanup_ms=%.3f max_create_ms=%.3f max_sleep_overrun_ms=%.3f "
+                "creates=%u create_failures=%u audio_queued_bytes=%d audio_files=%d legacy_debug_log=%d",
+                (unsigned long long)uwp_render_trace_frame, frames, (double)target_frame_time_ns / 1e6,
+                total_ms / frames, max_frame_ms, over_20, over_33, slow_details > 8 ? slow_details - 8 : 0,
+                intervals ? total_interval_ms / intervals : 0.0, max_interval_ms, intervals,
+                intervals_over_20, intervals_over_33, max_work_ms, max_pre_render_ms,
+                max_adx_ms, max_geometry_ms, max_copy_ms,
+                max_present_ms, max_cleanup_ms, max_create_ms, max_sleep_overrun_ms,
+                texture_creates, texture_failures, ADX_GetQueuedBytes(), ADX_GetNumFiles(), DebugLog_IsEnabled());
+        log_uwp_cache_stats("window", &cache_window);
+        SDL_zero(cache_window);
+        frames = over_20 = over_33 = slow_details = texture_creates = texture_failures = 0;
+        total_ms = max_frame_ms = max_interval_ms = max_work_ms = max_pre_render_ms = 0.0;
+        max_adx_ms = max_geometry_ms = max_copy_ms = max_present_ms = max_cleanup_ms = 0.0;
+        max_create_ms = max_sleep_overrun_ms = 0.0;
+        intervals = intervals_over_20 = intervals_over_33 = 0;
+        total_interval_ms = 0.0;
+    }
+}
+
+static void SDLCALL capture_uwp_video_log(void* userdata,
+                                          int category,
+                                          SDL_LogPriority priority,
+                                          const char* message) {
+    UWPRenderLogCapture* capture = (UWPRenderLogCapture*)userdata;
+
+    if (capture != NULL &&
+        (category == SDL_LOG_CATEGORY_VIDEO || category == SDL_LOG_CATEGORY_RENDER) &&
+        priority >= SDL_LOG_PRIORITY_WARN) {
+        const size_t used = SDL_strlen(capture->messages);
+        if (used < sizeof(capture->messages) - 1) {
+            SDL_snprintf(capture->messages + used,
+                         sizeof(capture->messages) - used,
+                         "[category=%d priority=%d] %s\n",
+                         category,
+                         (int)priority,
+                         message != NULL ? message : "(empty SDL log message)");
+        }
+    }
+
+    if (capture != NULL && capture->previous_output != NULL) {
+        capture->previous_output(capture->previous_userdata, category, priority, message);
+    }
+}
+#else
+#define UWP_RENDER_CALL(call) (call)
+#endif
+
 static bool pause_requested = false;
 static bool has_input_focus = true;
 static bool config_initialized = false;
@@ -190,7 +611,27 @@ static bool init_window() {
         window_height = window_min_height;
     }
 
+#if defined(SF3_UWP)
+    SDL_zero(uwp_render_log_capture);
+    SDL_GetLogOutputFunction(&uwp_render_log_capture.previous_output, &uwp_render_log_capture.previous_userdata);
+    SDL_SetLogOutputFunction(capture_uwp_video_log, &uwp_render_log_capture);
+
+    const bool window_and_renderer_created =
+        SDL_CreateWindowAndRenderer(app_name, window_width, window_height, window_flags, &window, &renderer);
+    if (!window_and_renderer_created) {
+        const char* error = SDL_GetError();
+        SDL_strlcpy(uwp_window_renderer_error,
+                    error != NULL && error[0] != '\0' ? error : "(SDL returned no error details)",
+                    sizeof(uwp_window_renderer_error));
+    }
+
+    SDL_SetLogOutputFunction(uwp_render_log_capture.previous_output,
+                             uwp_render_log_capture.previous_userdata);
+
+    if (!window_and_renderer_created) {
+#else
     if (!SDL_CreateWindowAndRenderer(app_name, window_width, window_height, window_flags, &window, &renderer)) {
+#endif
         SDL_Log("Couldn't create window/renderer: %s", SDL_GetError());
         return false;
     }
@@ -205,7 +646,7 @@ static bool init_window() {
     // Present once so UWP can dismiss the splash screen.
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(renderer);
-    SDL_RenderPresent(renderer);
+    UWP_RENDER_CALL(SDL_RenderPresent(renderer));
 #endif
     return true;
 }
@@ -214,6 +655,12 @@ bool SDLApp_PreInit() {
     SDL_SetAppMetadata(app_name, "0.1", NULL);
     SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_PREFER_LIBDECOR, "1");
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
+#if defined(SF3_UWP)
+    if (!SDL_SetHintWithPriority(SDL_HINT_RENDER_DRIVER, "direct3d11", SDL_HINT_OVERRIDE)) {
+        critical_error("Couldn't select the Direct3D 11 renderer: %s", SDL_GetError());
+        return false;
+    }
+#endif
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         critical_error("Couldn't initialize SDL video: %s", SDL_GetError());
@@ -232,6 +679,9 @@ static void init_audio() {
 bool SDLApp_FullInit() {
     Config_Init();
     config_initialized = true;
+#if defined(SF3_UWP)
+    init_uwp_render_trace();
+#endif
     Keymap_Init();
     init_scalemode();
     init_aspect_ratio();
@@ -249,7 +699,15 @@ bool SDLApp_FullInit() {
 #endif
 
     if (!init_window()) {
+#if defined(SF3_UWP)
+        const char* diagnostics = uwp_render_log_capture.messages[0] != '\0'
+                                      ? uwp_render_log_capture.messages
+                                      : "(SDL emitted no video/render warnings during initialization.)";
+        log_error("SDL video/render initialization diagnostics:\n%s", diagnostics);
+        critical_error("Couldn't initialize the SDL window and renderer: %s", uwp_window_renderer_error);
+#else
         critical_error("Couldn't initialize the SDL window and renderer: %s", SDL_GetError());
+#endif
         return false;
     }
 
@@ -372,6 +830,25 @@ void SDLApp_Quit() {
         window = NULL;
     }
 
+#if defined(SF3_UWP)
+    if (uwp_render_trace_file != NULL) {
+        SDL_Log("[UWP_RENDER] session_end frames=%llu samples=%u",
+                (unsigned long long)uwp_render_trace_frame, uwp_render_trace_samples);
+        SDL_SetLogOutputFunction(uwp_trace_previous_output, uwp_trace_previous_userdata);
+        SDL_LockMutex(uwp_render_trace_mutex);
+        uwp_trace_stop = true;
+        SDL_SignalCondition(uwp_trace_condition);
+        SDL_UnlockMutex(uwp_render_trace_mutex);
+        SDL_WaitThread(uwp_trace_thread, NULL);
+        uwp_trace_thread = NULL;
+        SDL_CloseIO(uwp_render_trace_file);
+        uwp_render_trace_file = NULL;
+        SDL_DestroyMutex(uwp_render_trace_mutex);
+        uwp_render_trace_mutex = NULL;
+        SDL_DestroyCondition(uwp_trace_condition);
+        uwp_trace_condition = NULL;
+    }
+#endif
     SDL_Quit();
 }
 
@@ -438,10 +915,19 @@ bool SDLApp_PollEvents() {
             break;
 
         case SDL_EVENT_WINDOW_RESIZED:
+#if defined(SF3_UWP)
+            SDL_Log("[UWP_RENDER] window_resized data=%d,%d", event.window.data1, event.window.data2);
+#endif
             if (!create_screen_texture()) {
                 SDL_Log("Couldn't resize the screen texture; keeping the previous texture: %s", SDL_GetError());
             }
             break;
+
+#if defined(SF3_UWP)
+        case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+            SDL_Log("[UWP_RENDER] window_pixel_size_changed data=%d,%d", event.window.data1, event.window.data2);
+            break;
+#endif
 
         case SDL_EVENT_WINDOW_FOCUS_LOST:
             has_input_focus = false;
@@ -483,10 +969,18 @@ const char* SDLApp_GetFrameTimingName() {
 }
 
 void SDLApp_BeginFrame() {
+#if defined(SF3_UWP)
+    if (uwp_trace_thread != NULL) {
+        uwp_frame_start_ns = SDL_GetTicksNS();
+        uwp_frame_interval_ms = uwp_previous_frame_start_ns != 0
+            ? (double)(uwp_frame_start_ns - uwp_previous_frame_start_ns) / 1e6 : 0.0;
+        uwp_previous_frame_start_ns = uwp_frame_start_ns;
+    }
+#endif
     // Clear window
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-    SDL_SetRenderTarget(renderer, NULL);
-    SDL_RenderClear(renderer);
+    UWP_RENDER_CALL(SDL_SetRenderTarget(renderer, NULL));
+    UWP_RENDER_CALL(SDL_RenderClear(renderer));
 
     SDLMessageRenderer_BeginFrame();
     SDLGameRenderer_BeginFrame();
@@ -616,6 +1110,15 @@ static bool queue_texture_screenshot(SDL_Texture* texture) {
 }
 
 void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
+#if defined(SF3_UWP)
+    SDLAppFrameTiming uwp_timing;
+    if (uwp_trace_thread != NULL) {
+        uwp_pre_render_ms = (double)(SDL_GetTicksNS() - uwp_frame_start_ns) / 1e6;
+        if (timing == NULL) {
+            timing = &uwp_timing;
+        }
+    }
+#endif
     if (timing != NULL) {
         SDL_zero(*timing);
     }
@@ -635,29 +1138,46 @@ void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
 
     // Render
 
+#if defined(SF3_UWP)
+    begin_uwp_render_sample();
+#endif
+
     const Uint64 game_renderer_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
     SDLGameRenderer_RenderFrame(timing != NULL ? &timing->render_stats : NULL);
+#if defined(SF3_UWP)
+    trace_uwp_target("game_geometry_queued");
+#endif
     if (timing != NULL) {
         timing->game_renderer_render_ms = (double)(SDL_GetTicksNS() - game_renderer_start_ns) / 1e6;
     }
 
     const Uint64 screen_copy_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
-    SDL_SetRenderTarget(renderer, screen_texture);
+    UWP_RENDER_CALL(SDL_SetRenderTarget(renderer, screen_texture));
+#if defined(SF3_UWP)
+    trace_uwp_target("screen_composition");
+#endif
 
     // Render window background
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); // black bars
-    SDL_RenderClear(renderer);
+    UWP_RENDER_CALL(SDL_RenderClear(renderer));
 
     // Render content
     const SDL_FRect dst_rect = get_letterbox_rect(screen_texture->w, screen_texture->h);
-    SDL_RenderTexture(renderer, cps3_canvas, NULL, &dst_rect);
+#if defined(SF3_UWP)
+    if (uwp_render_trace_sample) {
+        SDL_Log("[UWP_RENDER] frame=%llu letterbox=%g,%g,%g,%g cps3=%dx%d messages=%dx%d",
+                (unsigned long long)uwp_render_trace_frame, dst_rect.x, dst_rect.y, dst_rect.w, dst_rect.h,
+                cps3_canvas->w, cps3_canvas->h, message_canvas->w, message_canvas->h);
+    }
+#endif
+    UWP_RENDER_CALL(SDL_RenderTexture(renderer, cps3_canvas, NULL, &dst_rect));
 
     if (scanlines_initialized && !SDLScanlines_Render(renderer, &dst_rect) && !scanlines_render_error_logged) {
         log_error("Couldn't render the scanline texture: %s", SDL_GetError());
         scanlines_render_error_logged = true;
     }
 
-    SDL_RenderTexture(renderer, message_canvas, NULL, &dst_rect);
+    UWP_RENDER_CALL(SDL_RenderTexture(renderer, message_canvas, NULL, &dst_rect));
 
     if (should_render_bezel() && !SDLBezel_Render(renderer, screen_texture->w, screen_texture->h) &&
         !bezel_render_error_logged) {
@@ -666,8 +1186,11 @@ void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
     }
 
     // Render screen texture to screen
-    SDL_SetRenderTarget(renderer, NULL);
-    SDL_RenderTexture(renderer, screen_texture, NULL, NULL);
+    UWP_RENDER_CALL(SDL_SetRenderTarget(renderer, NULL));
+    UWP_RENDER_CALL(SDL_RenderTexture(renderer, screen_texture, NULL, NULL));
+#if defined(SF3_UWP)
+    trace_uwp_target("window_presentation");
+#endif
     if (timing != NULL) {
         timing->screen_copy_ms = (double)(SDL_GetTicksNS() - screen_copy_start_ns) / 1e6;
     }
@@ -698,7 +1221,7 @@ void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
 #endif
 
     const Uint64 present_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
-    SDL_RenderPresent(renderer);
+    UWP_RENDER_CALL(SDL_RenderPresent(renderer));
     if (timing != NULL) {
         timing->present_ms = (double)(SDL_GetTicksNS() - present_start_ns) / 1e6;
     }
@@ -719,6 +1242,10 @@ void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
     }
 
     // Do frame pacing
+#if defined(SF3_UWP)
+    const double uwp_work_ms = uwp_trace_thread != NULL
+        ? (double)(SDL_GetTicksNS() - uwp_frame_start_ns) / 1e6 : 0.0;
+#endif
     const Uint64 pacing_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
     Uint64 now = SDL_GetTicksNS();
 
@@ -759,6 +1286,11 @@ void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
             timing->pacing_overhead_ms = 0.0;
         }
     }
+#if defined(SF3_UWP)
+    if (uwp_trace_thread != NULL) {
+        record_uwp_frame_perf(timing, uwp_work_ms);
+    }
+#endif
 }
 
 void SDLApp_Exit() {

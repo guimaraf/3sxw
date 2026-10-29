@@ -32,7 +32,8 @@
 #error Need to build shaders with level_9_3
 #endif
 
-// The shaders here were compiled with compile_shaders.bat
+// The shaders here were compiled with compile_shaders.bat, except for the
+// Xbox One UWP advanced shader generated as ps_4_0 by this port's CMake build.
 
 #define g_main D3D11_PixelShader_Colors
 #include "D3D11_PixelShader_Colors.h"
@@ -43,7 +44,13 @@
 #undef g_main
 
 #define g_main D3D11_PixelShader_Advanced
+#ifdef SF3_UWP_D3D11_ADVANCED_SM4
+#include <SF3_D3D11_PixelShader_Advanced_SM4.h>
+#define SDL_D3D11_ADVANCED_SHADER_PROFILE "ps_4_0"
+#else
 #include "D3D11_PixelShader_Advanced.h"
+#define SDL_D3D11_ADVANCED_SHADER_PROFILE "ps_5_0"
+#endif
 #undef g_main
 
 #define g_main D3D11_VertexShader
@@ -99,12 +106,25 @@ bool D3D11_CreateVertexShader(ID3D11Device1 *d3dDevice, ID3D11VertexShader **ver
 bool D3D11_CreatePixelShader(ID3D11Device1 *d3dDevice, D3D11_Shader shader, ID3D11PixelShader **pixelShader)
 {
     HRESULT result;
+#ifdef SDL_PLATFORM_WINRT
+    static unsigned int diagnosticAttempts[NUM_SHADERS];
+#endif
 
     result = ID3D11Device_CreatePixelShader(d3dDevice,
                                             D3D11_shaders[shader].shader_data,
                                             D3D11_shaders[shader].shader_size,
                                             NULL,
                                             pixelShader);
+#ifdef SDL_PLATFORM_WINRT
+    if (diagnosticAttempts[shader] < 8) {
+        diagnosticAttempts[shader]++;
+        SDL_Log("[UWP_RENDER] d3d11_pixel_shader shader=%d profile=%s hr=0x%08lX "
+                "feature_level=0x%04X attempt=%u bytes=%llu",
+                (int)shader, shader == SHADER_ADVANCED ? SDL_D3D11_ADVANCED_SHADER_PROFILE : "ps_4_0_level_9_1",
+                (unsigned long)result, (unsigned int)ID3D11Device_GetFeatureLevel(d3dDevice),
+                diagnosticAttempts[shader], (unsigned long long)D3D11_shaders[shader].shader_size);
+    }
+#endif
     if (FAILED(result)) {
         return WIN_SetErrorFromHRESULT("ID3D11Device1::CreatePixelShader", result);
     }

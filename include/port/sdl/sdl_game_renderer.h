@@ -35,6 +35,23 @@ typedef struct Sprite2 {
 } Sprite2;
 
 typedef struct SDLGameRendererStats {
+#if defined(SF3_UWP)
+    int texture_create_calls;
+    int texture_create_failures;
+    double texture_create_ms;
+    int cache_hits;
+    int retained_on_unlock;
+    int snapshot_invalidations;
+    int resize_recreates;
+    int cache_palette_invalidations;
+    int cache_pixel_invalidations;
+    int cache_release_invalidations;
+    int unlock_palette_calls;
+    int unlock_texture_calls;
+    int largest_create_w;
+    int largest_create_h;
+    Uint64 upload_bytes;
+#endif
     int render_tasks;
     int geometry_calls;
     int texture_cache_misses;

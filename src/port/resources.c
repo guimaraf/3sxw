@@ -13,9 +13,179 @@
 
 static const char* afs_path = NULL;
 
+#if defined(SF3_UWP)
+static void copy_sdl_error(char* destination, size_t destination_size) {
+    const char* error = SDL_GetError();
+    SDL_strlcpy(destination, error != NULL && error[0] != '\0' ? error : "(none)", destination_size);
+}
+
+static void write_uwp_resource_check_log(const char* path,
+                                         bool path_info_ok,
+                                         const SDL_PathInfo* path_info,
+                                         const char* path_info_error,
+                                         bool stream_opened,
+                                         const char* stream_open_error,
+                                         Sint64 stream_size,
+                                         const char* stream_size_error,
+                                         size_t sample_bytes_read,
+                                         const char* sample_hex,
+                                         SDL_IOStatus stream_status,
+                                         const char* stream_read_error,
+                                         bool stream_closed,
+                                         const char* stream_close_error,
+                                         bool file_detected) {
+    const char* base_path = Paths_GetPrefPath();
+    const char* data_path = Paths_GetDataPath();
+    char* log_path = NULL;
+
+    if (data_path != NULL) {
+        SDL_asprintf(&log_path, "%suwp_resource_check.log", data_path);
+    } else if (base_path != NULL) {
+        SDL_asprintf(&log_path, "%suwp_resource_check.log", base_path);
+    }
+
+    if (log_path == NULL) {
+        SDL_Log("UWP resource diagnostic: couldn't allocate the log path.");
+        return;
+    }
+
+    char* report = NULL;
+    const int report_length = SDL_asprintf(
+        &report,
+        "3SXW UWP resource diagnostic\n"
+        "build_date=%s\n"
+        "build_time=%s\n"
+        "base_path=%s\n"
+        "data_path=%s\n"
+        "afs_path=%s\n"
+        "path_info_success=%d\n"
+        "path_info_type=%d\n"
+        "path_info_size=%llu\n"
+        "path_info_error=%s\n"
+        "file_detected=%d\n"
+        "stream_opened=%d\n"
+        "stream_open_error=%s\n"
+        "stream_size=%lld\n"
+        "stream_size_error=%s\n"
+        "sample_bytes_read=%llu\n"
+        "sample_hex=%s\n"
+        "stream_status=%d\n"
+        "stream_read_error=%s\n"
+        "stream_closed=%d\n"
+        "stream_close_error=%s\n",
+        __DATE__,
+        __TIME__,
+        base_path != NULL ? base_path : "(null)",
+        data_path != NULL ? data_path : "(null)",
+        path != NULL ? path : "(null)",
+        path_info_ok ? 1 : 0,
+        (int)path_info->type,
+        (unsigned long long)path_info->size,
+        path_info_error,
+        file_detected ? 1 : 0,
+        stream_opened ? 1 : 0,
+        stream_open_error,
+        (long long)stream_size,
+        stream_size_error,
+        (unsigned long long)sample_bytes_read,
+        sample_hex,
+        (int)stream_status,
+        stream_read_error,
+        stream_closed ? 1 : 0,
+        stream_close_error);
+
+    if (report == NULL || report_length < 0) {
+        SDL_Log("UWP resource diagnostic: couldn't format the report: %s", SDL_GetError());
+        SDL_free(report);
+        SDL_free(log_path);
+        return;
+    }
+
+    SDL_ClearError();
+    SDL_IOStream* log_stream = SDL_IOFromFile(log_path, "wb");
+    if (log_stream == NULL) {
+        SDL_Log("UWP resource diagnostic: couldn't open %s: %s", log_path, SDL_GetError());
+    } else {
+        const size_t report_size = (size_t)report_length;
+        const size_t report_written = SDL_WriteIO(log_stream, report, report_size);
+        const bool log_closed = SDL_CloseIO(log_stream);
+        if (report_written != report_size || !log_closed) {
+            SDL_Log("UWP resource diagnostic: couldn't write the complete report to %s: %s",
+                    log_path,
+                    SDL_GetError());
+        }
+    }
+
+    SDL_free(report);
+    SDL_free(log_path);
+}
+#endif
+
 static bool file_exists(const char* path) {
     SDL_PathInfo path_info = { 0 };
-    return SDL_GetPathInfo(path, &path_info) && path_info.type == SDL_PATHTYPE_FILE;
+#if defined(SF3_UWP)
+    SDL_ClearError();
+#endif
+    const bool path_info_ok = SDL_GetPathInfo(path, &path_info);
+    const bool detected = path_info_ok && path_info.type == SDL_PATHTYPE_FILE;
+
+#if defined(SF3_UWP)
+    char path_info_error[256];
+    copy_sdl_error(path_info_error, sizeof(path_info_error));
+
+    SDL_ClearError();
+    SDL_IOStream* stream = SDL_IOFromFile(path, "rb");
+    const bool stream_opened = stream != NULL;
+    char stream_open_error[256];
+    copy_sdl_error(stream_open_error, sizeof(stream_open_error));
+
+    Sint64 stream_size = -1;
+    char stream_size_error[256] = "(not attempted)";
+    size_t sample_bytes_read = 0;
+    char sample_hex[33] = "";
+    SDL_IOStatus stream_status = SDL_IO_STATUS_READY;
+    char stream_read_error[256] = "(not attempted)";
+    bool stream_closed = false;
+    char stream_close_error[256] = "(not attempted)";
+
+    if (stream != NULL) {
+        SDL_ClearError();
+        stream_size = SDL_GetIOSize(stream);
+        copy_sdl_error(stream_size_error, sizeof(stream_size_error));
+
+        unsigned char sample[16] = { 0 };
+        SDL_ClearError();
+        sample_bytes_read = SDL_ReadIO(stream, sample, sizeof(sample));
+        stream_status = SDL_GetIOStatus(stream);
+        copy_sdl_error(stream_read_error, sizeof(stream_read_error));
+
+        for (size_t i = 0; i < sample_bytes_read; i++) {
+            SDL_snprintf(&sample_hex[i * 2], sizeof(sample_hex) - (i * 2), "%02X", sample[i]);
+        }
+
+        SDL_ClearError();
+        stream_closed = SDL_CloseIO(stream);
+        copy_sdl_error(stream_close_error, sizeof(stream_close_error));
+    }
+
+    write_uwp_resource_check_log(path,
+                                 path_info_ok,
+                                 &path_info,
+                                 path_info_error,
+                                 stream_opened,
+                                 stream_open_error,
+                                 stream_size,
+                                 stream_size_error,
+                                 sample_bytes_read,
+                                 sample_hex,
+                                 stream_status,
+                                 stream_read_error,
+                                 stream_closed,
+                                 stream_close_error,
+                                 detected);
+#endif
+
+    return detected;
 }
 
 #if !defined(SF3_UWP)
@@ -304,14 +474,39 @@ static void process_dialog_result() {
 #endif
 
 char* Resources_GetPath(const char* file_path) {
-    const char* base = Paths_GetPrefPath();
     char* full_path = NULL;
 
+#if defined(SF3_UWP)
+    const char* base = Paths_GetBasePath();
+    if (base == NULL) {
+        return NULL;
+    }
+
+    // Keep the UWP resource file in the app-created LocalState/data directory.
+    if (Paths_GetDataPath() == NULL) {
+        return NULL;
+    }
+
+    // SDL's WinRT pref path can end with repeated separators when org and app are empty.
+    // Trim them before adding the LocalState-relative data path.
+    size_t base_length = SDL_strlen(base);
+    while (base_length > 0 && (base[base_length - 1] == '\\' || base[base_length - 1] == '/')) {
+        base_length--;
+    }
+
+    if (file_path == NULL) {
+        SDL_asprintf(&full_path, "%.*s\\data\\", (int)base_length, base);
+    } else {
+        SDL_asprintf(&full_path, "%.*s\\data\\%s", (int)base_length, base, file_path);
+    }
+#else
+    const char* base = Paths_GetPrefPath();
     if (file_path == NULL) {
         SDL_asprintf(&full_path, "%sresources/", base);
     } else {
         SDL_asprintf(&full_path, "%sresources/%s", base, file_path);
     }
+#endif
 
     return full_path;
 }
