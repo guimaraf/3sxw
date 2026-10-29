@@ -1,9 +1,8 @@
 name: Release
 
 on:
-  # push:
-  #   branches: [ "main" ]
-  workflow_dispatch:
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -191,44 +190,9 @@ jobs:
           merge-multiple: true
           path: release-assets
 
-      - name: Move rolling release tag to current commit
-        env:
-          TAG_NAME: rolling-pre-release
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -f "${TAG_NAME}" "${GITHUB_SHA}"
-          git push origin "refs/tags/${TAG_NAME}" --force
-
-      - name: Create or update GitHub release
+      - name: Attach packages to published release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG_NAME: rolling-pre-release
-          FULL_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          SHORT_SHA="${FULL_SHA:0:7}"
-
-          touch notes.md
-          echo "Automatic release for commit ${FULL_SHA}" >> notes.md
-          echo >> notes.md
-          echo "⚠️ **Disclaimer** ⚠️: This is a __pre-release__ build. Expect bugs and instability." >> notes.md
-
-          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
-            gh release edit "${TAG_NAME}" \
-              --title "${SHORT_SHA}" \
-              --prerelease \
-              --notes-file notes.md
-
-            for asset in $(gh release view "${TAG_NAME}" --json assets --jq '.assets[].name'); do
-              gh release delete-asset "${TAG_NAME}" "${asset}" --yes
-            done
-
-            gh release upload "${TAG_NAME}" release-assets/* --clobber
-          else
-            gh release create "${TAG_NAME}" release-assets/* \
-              --title "${SHORT_SHA}" \
-              --prerelease \
-              --notes-file notes.md
-          fi
+          gh release upload "${GITHUB_REF_NAME}" release-assets/* --clobber
