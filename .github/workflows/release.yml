@@ -1,8 +1,10 @@
 name: Release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
+      - '[0-9]*'
 
 permissions:
   contents: write
@@ -190,9 +192,16 @@ jobs:
           merge-multiple: true
           path: release-assets
 
-      - name: Attach packages to published release
+      - name: Create release and attach platform packages
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          gh release upload "${GITHUB_REF_NAME}" release-assets/* --clobber
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" release-assets/* --clobber
+          else
+            gh release create "${RELEASE_TAG}" release-assets/* \
+              --title "${RELEASE_TAG}" \
+              --generate-notes
+          fi
