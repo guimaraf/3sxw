@@ -1,0 +1,7 @@
+*.hlsl
+*.metal
+*.spv
+*.tmp.h
+
+# Keep vendored shader sources.
+!*.hlsl

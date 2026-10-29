@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "sources": {
+    "sdl3": {
+      "version": "3.4.14",
+      "repository": "https://github.com/SternXD/SDL3-uwp.git",
+      "commit": "df16f8be71bdc68ade12a90b993c8f02232a76de",
+      "path": "SDL3",
+      "license": "SDL3/LICENSE.txt"
+    }
+  }
+}

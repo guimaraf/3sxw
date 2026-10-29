@@ -9,6 +9,7 @@ on:
 
 jobs:
     build:
+        if: ${{ github.ref != 'refs/heads/UWP' && github.head_ref != 'UWP' }}
         runs-on: windows-latest
 
         defaults:

@@ -1,0 +1,97 @@
+name: Build (Xbox UWP)
+
+on:
+  push:
+    branches: [ "UWP" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xbox-uwp-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VCPKG_ROOT: ${{ github.workspace }}\.vcpkg
+  VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\.vcpkg-binary-cache
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/UWP'
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout UWP sources
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned vcpkg
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: 80f9bcfa455e875d9c1bf7a7c6692d7e1e481061
+          path: .vcpkg
+
+      - name: Cache UWP dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: windows-2022-x64-uwp-${{ hashFiles('ports/uwp/vcpkg.json', 'ports/uwp/CMakePresets.json') }}
+
+      - name: Bootstrap vcpkg
+        run: |
+          New-Item -ItemType Directory -Force $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg bootstrap failed." }
+
+      - name: Build UWP only
+        run: |
+          New-Item -ItemType Directory -Force logs | Out-Null
+          Start-Transcript -Path logs/uwp-build.log
+          try {
+            ./scripts/build/build-uwp.ps1 -Configuration Release -Version 1.0.0
+          } finally {
+            Stop-Transcript
+          }
+
+      - name: Sign test package
+        run: |
+          $password = [guid]::NewGuid().ToString('N')
+          $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+          $pfx = Join-Path $env:RUNNER_TEMP '3sxw-test.pfx'
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=3SXW' -CertStoreLocation Cert:\CurrentUser\My -KeyExportPolicy Exportable -HashAlgorithm SHA256 -NotAfter (Get-Date).AddMonths(3)
+          try {
+            Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $securePassword | Out-Null
+            $cer = Join-Path $env:RUNNER_TEMP '3sxw-test.cer'
+            Export-Certificate -Cert $cert -FilePath $cer | Out-Null
+            Import-Certificate -FilePath $cer -CertStoreLocation Cert:\CurrentUser\TrustedPeople | Out-Null
+            ./scripts/build/sign-uwp.ps1 -CertificatePath $pfx -CertificatePassword $password -ArchiveName '3SXW-Xbox-UWP-test' -Version 1.0.0
+          } finally {
+            Remove-Item -LiteralPath $pfx -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath "Cert:\CurrentUser\My\$($cert.Thumbprint)" -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath "Cert:\CurrentUser\TrustedPeople\$($cert.Thumbprint)" -ErrorAction SilentlyContinue
+          }
+
+      - name: Upload installable test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: 3SXW-Xbox-UWP-test
+          path: dist/xbox-uwp/3SXW-Xbox-UWP-test.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Xbox-UWP-diagnostics
+          path: |
+            logs/
+            ports/uwp/build/**/CMakeConfigureLog.yaml
+            ports/uwp/build/**/CMakeCache.txt
+            ports/uwp/vcpkg_installed/vcpkg/issue_body.md
+          if-no-files-found: ignore
+          retention-days: 14

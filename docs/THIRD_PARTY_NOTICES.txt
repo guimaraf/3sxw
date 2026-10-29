@@ -23,6 +23,8 @@ SDL3
 ----
 Project: SDL3
 Upstream: https://github.com/libsdl-org/SDL
+UWP fork: https://github.com/SternXD/SDL3-uwp
+Vendored snapshot provenance: ports/uwp/third_party/PROVENANCE.md
 
 3SX links against:
 - SDL3
@@ -96,3 +98,11 @@ License: Apache-2.0, as provided by Mbed-TLS contributors.
 
 Copyright:
 - Copyright (C) Mbed-TLS contributors.
+
+Mbed TLS (UWP)
+--------------
+Project: Mbed TLS
+Upstream: https://github.com/Mbed-TLS/mbedtls
+Component: mbedcrypto, restored through the pinned vcpkg baseline.
+License: Apache License 2.0.
+Copyright: Mbed TLS contributors.

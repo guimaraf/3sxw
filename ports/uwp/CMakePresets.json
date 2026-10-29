@@ -1,0 +1,52 @@
+{
+  "version": 5,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "uwp-base",
+      "hidden": true,
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_SYSTEM_NAME": "WindowsStore",
+        "CMAKE_SYSTEM_VERSION": "10.0.19041.0",
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-uwp-static-md",
+        "VCPKG_MANIFEST_DIR": "${sourceDir}"
+      }
+    },
+    {
+      "name": "uwp-release",
+      "inherits": "uwp-base",
+      "displayName": "3SXW UWP Release"
+    },
+    {
+      "name": "uwp-relwithdebinfo",
+      "inherits": "uwp-base",
+      "displayName": "3SXW UWP RelWithDebInfo"
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "uwp-release",
+      "configurePreset": "uwp-release",
+      "configuration": "Release",
+      "targets": [
+        "SF3UWP"
+      ]
+    },
+    {
+      "name": "uwp-relwithdebinfo",
+      "configurePreset": "uwp-relwithdebinfo",
+      "configuration": "RelWithDebInfo",
+      "targets": [
+        "SF3UWP"
+      ]
+    }
+  ]
+}

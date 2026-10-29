@@ -21,6 +21,9 @@ __pycache__
 /appConfig/build/
 temp
 third_party
+/ports/uwp/build/
+!/ports/uwp/third_party/
+!/ports/uwp/third_party/**
 states
 
 # Temporary and original folders
@@ -33,3 +36,6 @@ prints/*
 githuberror.txt
 
 .future/
+
+/.vcpkg/
+/.vcpkg-binary-cache/
