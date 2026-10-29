@@ -17,8 +17,6 @@
 #include <SDL3/SDL.h>
 #include <limits.h>
 
-#define FRAME_END_TIMES_MAX 30
-
 typedef enum ScaleMode {
     SCALEMODE_NEAREST,
     SCALEMODE_LINEAR,
@@ -43,13 +41,6 @@ static double target_frame_rate = 59.59949;
 static Uint64 target_frame_time_ns = 1000000000.0 / 59.59949;
 
 static Uint64 frame_deadline = 0;
-static Uint64 frame_end_times[FRAME_END_TIMES_MAX];
-static int frame_end_times_index = 0;
-static bool frame_end_times_filled = false;
-#if DEBUG
-static double fps = 0;
-static Uint64 frame_counter = 0;
-#endif
 
 static bool should_save_screenshot = false;
 static bool pause_requested = false;
@@ -572,35 +563,6 @@ static bool should_render_bezel() {
     return output_is_16_by_9(output_width, output_height);
 }
 
-static void note_frame_end_time() {
-    frame_end_times[frame_end_times_index] = SDL_GetTicksNS();
-    frame_end_times_index += 1;
-    frame_end_times_index %= FRAME_END_TIMES_MAX;
-
-    if (frame_end_times_index == 0) {
-        frame_end_times_filled = true;
-    }
-}
-
-#if DEBUG
-static void update_fps() {
-    if (!frame_end_times_filled) {
-        return;
-    }
-
-    double total_frame_time_ms = 0;
-
-    for (int i = 0; i < FRAME_END_TIMES_MAX - 1; i++) {
-        const int cur = (frame_end_times_index + i) % FRAME_END_TIMES_MAX;
-        const int next = (cur + 1) % FRAME_END_TIMES_MAX;
-        total_frame_time_ms += (double)(frame_end_times[next] - frame_end_times[cur]) / 1e6;
-    }
-
-    double average_frame_time_ms = total_frame_time_ms / (FRAME_END_TIMES_MAX - 1);
-    fps = 1000 / average_frame_time_ms;
-}
-#endif
-
 static bool queue_texture_screenshot(SDL_Texture* texture) {
     SDL_Texture* previous_target = SDL_GetRenderTarget(renderer);
 
@@ -705,7 +667,6 @@ void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
     // SDL_GetRenderOutputSize(renderer, &window_width, NULL);
     // SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE);
     // SDL_SetRenderScale(renderer, 2, 2);
-    // SDL_RenderDebugTextFormat(renderer, (window_width / 2) - 88, 2, "FPS: %.3f", fps);
     // SDL_SetRenderScale(renderer, 1, 1);
     if (timing != NULL) {
         timing->debug_text_ms = (double)(SDL_GetTicksNS() - debug_text_start_ns) / 1e6;
@@ -766,14 +727,6 @@ void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
         frame_deadline = now + target_frame_time_ns;
     }
 
-    // Measure
-#if DEBUG
-    frame_counter += 1;
-#endif
-    note_frame_end_time();
-#if DEBUG
-    update_fps();
-#endif
     if (timing != NULL) {
         timing->pacing_ms = (double)(SDL_GetTicksNS() - pacing_start_ns) / 1e6;
         timing->pacing_overhead_ms = timing->pacing_ms - timing->sleep_ms;
