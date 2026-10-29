@@ -59,6 +59,16 @@
 #include "sf33rd/Source/Game/ui/flash_lp.h"
 #include "sf33rd/Source/Game/ui/sc_sub.h"
 #include "structs.h"
+#if defined(SF3_UWP)
+#include "port/sdl/sdl_app.h"
+#define UWP_GAME_PHASE(name, call) do { \
+    const Uint64 phase_start_ns = SDL_GetTicksNS(); \
+    call; \
+    SDLApp_RecordUWPGamePhase(name, SDL_GetTicksNS() - phase_start_ns); \
+} while (0)
+#else
+#define UWP_GAME_PHASE(name, call) call
+#endif
 
 void Wait_Auto_Load(struct _TASK* /* unused */);
 void Loop_Demo(struct _TASK* /* unused */);
@@ -132,22 +142,22 @@ void Game_Task(struct _TASK* task_ptr) {
             system_timer += 1;
         }
 
-        init_texcash_before_process();
-        seqsBeforeProcess();
+        UWP_GAME_PHASE("cache_prepare", init_texcash_before_process());
+        UWP_GAME_PHASE("task_seqs_before", seqsBeforeProcess());
 
         if (nowSoftReset() == 0) {
-            Main_Jmp_Tbl[G_No[0]](task_ptr);
+            UWP_GAME_PHASE("dispatch", Main_Jmp_Tbl[G_No[0]](task_ptr));
         }
 
-        seqsAfterProcess();
-        texture_cash_update();
-        move_pulpul_work();
-        Check_LDREQ_Queue();
+        UWP_GAME_PHASE("task_seqs_after", seqsAfterProcess());
+        UWP_GAME_PHASE("sprite_cache_update", texture_cash_update());
+        UWP_GAME_PHASE("rumble", move_pulpul_work());
+        UWP_GAME_PHASE("load_queue", Check_LDREQ_Queue());
     }
 
-    Check_Check_Screen();
-    Check_Pos_BG();
-    Disp_Sound_Code();
+    UWP_GAME_PHASE("screen_check", Check_Check_Screen());
+    UWP_GAME_PHASE("background_position", Check_Pos_BG());
+    UWP_GAME_PHASE("sound_codes", Disp_Sound_Code());
 }
 
 void Game() {
@@ -509,19 +519,19 @@ void Game2_1() {
     }
 
     set_EXE_flag();
-    ppgPurgeFromVRAM(5);
+    UWP_GAME_PHASE("purge_5", ppgPurgeFromVRAM(5));
 
     if (Disp_Cockpit) {
         Time_Control();
     }
 
-    Player_control();
-    TATE00();
-    Game_Management();
-    BG_Draw_System();
-    ppgPurgeFromVRAM(4);
-    reqPlayerDraw();
-    Basic_Sub_Ex();
+    UWP_GAME_PHASE("players", Player_control());
+    UWP_GAME_PHASE("stage_update", TATE00());
+    UWP_GAME_PHASE("management", Game_Management());
+    UWP_GAME_PHASE("background_draw", BG_Draw_System());
+    UWP_GAME_PHASE("purge_4", ppgPurgeFromVRAM(4));
+    UWP_GAME_PHASE("player_draw", reqPlayerDraw());
+    UWP_GAME_PHASE("basic_effects", Basic_Sub_Ex());
 
     if (Disp_Cockpit) {
         vital_cont_main();
@@ -536,8 +546,8 @@ void Game2_1() {
         Disp_Win_Record();
     }
 
-    ppgPurgeFromVRAM(0);
-    hit_check_main_process();
+    UWP_GAME_PHASE("purge_0", ppgPurgeFromVRAM(0));
+    UWP_GAME_PHASE("hit_check", hit_check_main_process());
 }
 
 void Game2_2() {

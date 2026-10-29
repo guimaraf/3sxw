@@ -80,6 +80,8 @@ extern void WINRT_UpdateWindowFlags(SDL_Window *window, SDL_WindowFlags mask);
 extern "C" SDL_WindowFlags WINRT_DetectWindowFlags(SDL_Window *window); // detects flags w/o applying them
 extern "C" bool WINRT_TVOutputSizeOverridesActive(void);
 extern "C" void WINRT_TVOutputOverrideApplyToWindow(SDL_Window *window);
+// 3SXW UWP: refresh Xbox output geometry on native view/DPI/activation events.
+extern "C" void WINRT_RefreshWindowGeometry(SDL_Window *window, const char *reason);
 #endif
 
 // Display mode internals

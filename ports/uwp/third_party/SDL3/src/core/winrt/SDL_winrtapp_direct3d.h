@@ -60,7 +60,10 @@ ref class SDL_WinRTApp sealed : public Windows::ApplicationModel::Core::IFramewo
     void OnOrientationChanged(Platform::Object ^ sender);
 #endif
     void OnWindowSizeChanged(Windows::UI::Core::CoreWindow ^ sender, Windows::UI::Core::WindowSizeChangedEventArgs ^ args);
-    void OnLogicalDpiChanged(Platform::Object ^ sender);
+#if NTDDI_VERSION > NTDDI_WIN8
+    // 3SXW UWP: use the DisplayInformation::DpiChanged delegate signature.
+    void OnLogicalDpiChanged(Windows::Graphics::Display::DisplayInformation ^ sender, Platform::Object ^ args);
+#endif
     void OnAppActivated(Windows::ApplicationModel::Core::CoreApplicationView ^ applicationView, Windows::ApplicationModel::Activation::IActivatedEventArgs ^ args);
     void OnSuspending(Platform::Object ^ sender, Windows::ApplicationModel::SuspendingEventArgs ^ args);
     void OnResuming(Platform::Object ^ sender, Platform::Object ^ args);

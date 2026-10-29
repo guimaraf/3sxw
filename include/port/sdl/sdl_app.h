@@ -9,6 +9,7 @@
 void SDLApp_TraceUWPInputEvent(const SDL_Event* event);
 void SDLApp_TraceUWPInputSample(SDL_Gamepad* pad, int slot, bool eligible);
 void SDLApp_TraceUWPInputCopy(Uint32 p1, Uint32 p2);
+void SDLApp_RecordUWPGamePhase(const char* name, Uint64 elapsed_ns);
 void SDLApp_RecordUWPGameTiming(const DebugFrameTiming* frame, const DebugStepStats* steps,
                                const DebugTaskStats* tasks);
 #endif

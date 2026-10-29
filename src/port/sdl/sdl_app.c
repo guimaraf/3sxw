@@ -85,6 +85,35 @@ static bool uwp_trace_verbose;
 static SDL_ThreadID uwp_trace_main_thread;
 static Uint64 uwp_frame_start_ns, uwp_previous_frame_start_ns;
 static double uwp_frame_interval_ms, uwp_pre_render_ms;
+static struct {
+    const char* name;
+    double ms;
+    unsigned int calls;
+} uwp_game_phases[32];
+static unsigned int uwp_game_phase_count;
+
+void SDLApp_RecordUWPGamePhase(const char* name, Uint64 elapsed_ns) {
+    if (uwp_trace_thread == NULL) {
+        return;
+    }
+    unsigned int i;
+    for (i = 0; i < uwp_game_phase_count; i++) {
+        if (SDL_strcmp(uwp_game_phases[i].name, name) == 0) {
+            break;
+        }
+    }
+    if (i == SDL_arraysize(uwp_game_phases)) {
+        return;
+    }
+    if (i == uwp_game_phase_count) {
+        uwp_game_phase_count++;
+        uwp_game_phases[i].name = name;
+        uwp_game_phases[i].ms = 0.0;
+        uwp_game_phases[i].calls = 0;
+    }
+    uwp_game_phases[i].ms += (double)elapsed_ns / 1e6;
+    uwp_game_phases[i].calls++;
+}
 
 typedef struct UWPInputTrace {
     Uint64 sequence, event_ns, poll_ns, sample_ns, copy_ns;
@@ -207,7 +236,7 @@ static int uwp_render_trace_worker(void* userdata) {
     char header[512];
     SDL_snprintf(header, sizeof(header),
         "ticks_ms=%llu [UWP_RENDER] session build=%s %s SDL_headers=%d SDL_runtime=%d "
-        "render_trace_version=6 limit_bytes=4194304 async_log=1 verbose=%d "
+        "render_trace_version=9 limit_bytes=4194304 async_log=1 verbose=%d "
         "logical_cpus=%d main_thread=%llu log_worker=%llu\n",
         (unsigned long long)SDL_GetTicks(), __DATE__, __TIME__, SDL_VERSION, SDL_GetVersion(),
         uwp_trace_verbose, SDL_GetNumLogicalCPUCores(), (unsigned long long)uwp_trace_main_thread,
@@ -354,8 +383,8 @@ static void init_uwp_render_trace(void) {
     SDL_SetLogOutputFunction(write_uwp_render_trace, NULL);
 }
 
-static void trace_uwp_target(const char* stage) {
-    if (!uwp_render_trace_sample) {
+static void trace_uwp_target(const char* stage, bool force) {
+    if (!uwp_render_trace_sample && !force) {
         return;
     }
     SDL_Texture* target = SDL_GetRenderTarget(renderer);
@@ -639,6 +668,13 @@ void SDLApp_RecordUWPGameTiming(const DebugFrameTiming* frame, const DebugStepSt
         DebugTaskStats current_tasks = *tasks;
         current_tasks.frame = uwp_render_trace_frame;
         log_uwp_game_profile("slow", frame, steps, &current_tasks);
+        for (unsigned int i = 0; i < uwp_game_phase_count; i++) {
+            if (uwp_game_phases[i].ms >= 1.0) {
+                SDL_Log("[UWP_PERF] game_phase frame=%llu name=%s calls=%u elapsed_ms=%.3f",
+                        (unsigned long long)uwp_render_trace_frame, uwp_game_phases[i].name,
+                        uwp_game_phases[i].calls, uwp_game_phases[i].ms);
+            }
+        }
     }
     if (frames == 120) {
         if (uwp_render_trace_frame % 600 == 0) {
@@ -776,6 +812,10 @@ static bool create_screen_texture() {
 }
 
 static void init_scalemode() {
+#if defined(SF3_UWP)
+    scale_mode = SCALEMODE_NEAREST;
+    return;
+#endif
     const char* raw_scalemode = Config_GetString(CFG_KEY_SCALEMODE);
 
     if (raw_scalemode == NULL) {
@@ -797,6 +837,10 @@ static void init_scalemode() {
 }
 
 static void init_aspect_ratio() {
+#if defined(SF3_UWP)
+    stretch_aspect_ratio = false;
+    return;
+#endif
     const char* raw_aspect_ratio = Config_GetString(CFG_KEY_ASPECT_RATIO);
     stretch_aspect_ratio = raw_aspect_ratio != NULL && SDL_strcmp(raw_aspect_ratio, "stretch") == 0;
 }
@@ -828,6 +872,20 @@ static bool init_window() {
     }
 
 #if defined(SF3_UWP)
+    SDL_Log("[UWP_RENDER] saved_presentation window=%dx%d fullscreen=%d scale_mode=%s aspect_ratio=%s "
+            "bezel=%d policy_override=1",
+            window_width, window_height, Config_GetBool(CFG_KEY_FULLSCREEN),
+            Config_GetString(CFG_KEY_SCALEMODE) ? Config_GetString(CFG_KEY_SCALEMODE) : "(default)",
+            Config_GetString(CFG_KEY_ASPECT_RATIO) ? Config_GetString(CFG_KEY_ASPECT_RATIO) : "(default)",
+            Config_GetBool(CFG_KEY_BEZEL));
+    /* Use the console's reported display size, never a saved desktop window size
+     * or a hard-coded 1080p target. Fullscreen lets WinRT occupy the whole view. */
+    window_flags = SDL_WINDOW_FULLSCREEN | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    const SDL_DisplayMode* console_mode = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+    if (console_mode != NULL && console_mode->w > 0 && console_mode->h > 0) {
+        window_width = console_mode->w;
+        window_height = console_mode->h;
+    }
     SDL_zero(uwp_render_log_capture);
     SDL_GetLogOutputFunction(&uwp_render_log_capture.previous_output, &uwp_render_log_capture.previous_userdata);
     SDL_SetLogOutputFunction(capture_uwp_video_log, &uwp_render_log_capture);
@@ -969,10 +1027,12 @@ bool SDLApp_FullInit() {
         return false;
     }
 
+#if !defined(SF3_UWP)
     if (Config_GetBool(CFG_KEY_BEZEL)) {
         const char* bezel_image = scale_mode == SCALEMODE_SQUARE_PIXELS ? "bezel-pixel-perfect.png" : "bezel.png";
         bezel_initialized = SDLBezel_Init(renderer, bezel_image);
     }
+#endif
 
     if (Config_GetBool(CFG_KEY_SCANLINES)) {
         scanlines_initialized = SDLScanlines_Init(renderer, Config_GetInt(CFG_KEY_SCANLINE_OPACITY));
@@ -1089,6 +1149,10 @@ static void set_screenshot_flag_if_needed(SDL_KeyboardEvent* event) {
 }
 
 static void handle_fullscreen_toggle(SDL_KeyboardEvent* event) {
+#if defined(SF3_UWP)
+    (void)event;
+    return;
+#endif
     const bool is_alt_enter = (event->key == SDLK_RETURN) && (event->mod & SDL_KMOD_ALT);
     const bool is_f11 = (event->key == SDLK_F11);
     const bool correct_key = (is_alt_enter || is_f11);
@@ -1158,6 +1222,7 @@ bool SDLApp_PollEvents() {
 #if defined(SF3_UWP)
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
             SDL_Log("[UWP_RENDER] window_pixel_size_changed data=%d,%d", event.window.data1, event.window.data2);
+            UWP_RENDER_CALL(create_screen_texture());
             break;
 #endif
 
@@ -1169,6 +1234,9 @@ bool SDLApp_PollEvents() {
             break;
 
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
+#if defined(SF3_UWP)
+            UWP_RENDER_CALL(SDL_SetWindowFullscreen(window, true));
+#endif
             has_input_focus = true;
             SDLPad_SetInputEnabled(true);
             break;
@@ -1202,6 +1270,7 @@ const char* SDLApp_GetFrameTimingName() {
 
 void SDLApp_BeginFrame() {
 #if defined(SF3_UWP)
+    uwp_game_phase_count = 0;
     if (uwp_trace_thread != NULL) {
         uwp_frame_start_ns = SDL_GetTicksNS();
         uwp_frame_interval_ms = uwp_previous_frame_start_ns != 0
@@ -1260,6 +1329,27 @@ static SDL_FRect fit_square_pixels_rect(int win_w, int win_h) {
 }
 
 static SDL_FRect get_letterbox_rect(int win_w, int win_h) {
+#if defined(SF3_UWP)
+    const SDL_FRect rect = fit_4_by_3_rect(win_w, win_h);
+    static int previous_w, previous_h;
+    if (win_w != previous_w || win_h != previous_h) {
+        previous_w = win_w;
+        previous_h = win_h;
+        int pixel_w = 0, pixel_h = 0;
+        int logical_w = 0, logical_h = 0;
+        int output_w = 0, output_h = 0;
+        SDL_GetWindowSizeInPixels(window, &pixel_w, &pixel_h);
+        SDL_GetWindowSize(window, &logical_w, &logical_h);
+        SDL_GetRenderOutputSize(renderer, &output_w, &output_h);
+        SDL_Log("[UWP_RENDER] presentation policy=fullscreen_4_3 bezel=0 fullscreen=%d "
+                "window_logical=%dx%d window_pixels=%dx%d output=%dx%d canvas=%dx%d "
+                "rect=%.1f,%.1f,%.1f,%.1f",
+                (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0,
+                logical_w, logical_h, pixel_w, pixel_h, output_w, output_h,
+                win_w, win_h, rect.x, rect.y, rect.w, rect.h);
+    }
+    return rect;
+#endif
     if (stretch_aspect_ratio) {
         return (SDL_FRect){ .x = 0.0f, .y = 0.0f, .w = (float)win_w, .h = (float)win_h };
     }
@@ -1377,7 +1467,7 @@ void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
     const Uint64 game_renderer_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
     SDLGameRenderer_RenderFrame(timing != NULL ? &timing->render_stats : NULL);
 #if defined(SF3_UWP)
-    trace_uwp_target("game_geometry_queued");
+    trace_uwp_target("game_geometry_queued", false);
 #endif
     if (timing != NULL) {
         timing->game_renderer_render_ms = (double)(SDL_GetTicksNS() - game_renderer_start_ns) / 1e6;
@@ -1386,7 +1476,7 @@ void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
     const Uint64 screen_copy_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
     UWP_RENDER_CALL(SDL_SetRenderTarget(renderer, screen_texture));
 #if defined(SF3_UWP)
-    trace_uwp_target("screen_composition");
+    trace_uwp_target("screen_composition", false);
 #endif
 
     // Render window background
@@ -1421,7 +1511,12 @@ void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
     UWP_RENDER_CALL(SDL_SetRenderTarget(renderer, NULL));
     UWP_RENDER_CALL(SDL_RenderTexture(renderer, screen_texture, NULL, NULL));
 #if defined(SF3_UWP)
-    trace_uwp_target("window_presentation");
+    static int previous_presentation_w, previous_presentation_h;
+    const bool presentation_size_changed = screen_texture->w != previous_presentation_w ||
+                                           screen_texture->h != previous_presentation_h;
+    trace_uwp_target("window_presentation", presentation_size_changed);
+    previous_presentation_w = screen_texture->w;
+    previous_presentation_h = screen_texture->h;
 #endif
     if (timing != NULL) {
         timing->screen_copy_ms = (double)(SDL_GetTicksNS() - screen_copy_start_ns) / 1e6;

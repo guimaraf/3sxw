@@ -102,13 +102,16 @@ bool SDL_WinRTInitNonXAMLApp(int (*mainFunction)(int, char **))
     return true;
 }
 
-static void WINRT_ProcessWindowSizeChange() // TODO: Pass an SDL_Window-identifying thing into WINRT_ProcessWindowSizeChange()
+static void WINRT_ProcessWindowSizeChange(const char *reason) // TODO: Pass an SDL_Window-identifying thing into WINRT_ProcessWindowSizeChange()
 {
     CoreWindow ^ coreWindow = CoreWindow::GetForCurrentThread();
     if (coreWindow) {
         if (WINRT_GlobalSDLWindow) {
             SDL_Window *window = WINRT_GlobalSDLWindow;
             SDL_WindowData *data = window->internal;
+
+            // 3SXW UWP: HDMI/output geometry can change independently of DIPs.
+            WINRT_RefreshWindowGeometry(window, reason);
 
             int x = (int)SDL_lroundf(data->coreWindow->Bounds.Left);
             int y = (int)SDL_lroundf(data->coreWindow->Bounds.Top);
@@ -221,7 +224,7 @@ void SDL_WinRTApp::OnOrientationChanged(Object ^ sender)
     }
 #endif
 
-    WINRT_ProcessWindowSizeChange();
+    WINRT_ProcessWindowSizeChange("orientation");
 
 #if SDL_WINAPI_FAMILY_PHONE
     // HACK: Make sure that orientation changes
@@ -314,6 +317,11 @@ void SDL_WinRTApp::SetWindow(CoreWindow ^ window)
 #if NTDDI_VERSION > NTDDI_WIN8
     DisplayInformation::GetForCurrentView()->OrientationChanged +=
         ref new TypedEventHandler<Windows::Graphics::Display::DisplayInformation ^, Object ^>(this, &SDL_WinRTApp::OnOrientationChanged);
+    // 3SXW UWP: a DPI change can alter the pixel size without a DIP resize.
+    if (SDL_GetWinRTDeviceFamily() == SDL_WINRT_DEVICEFAMILY_XBOX) {
+        DisplayInformation::GetForCurrentView()->DpiChanged +=
+            ref new TypedEventHandler<DisplayInformation ^, Object ^>(this, &SDL_WinRTApp::OnLogicalDpiChanged);
+    }
 #else
     DisplayProperties::OrientationChanged +=
         ref new DisplayPropertiesEventHandler(this, &SDL_WinRTApp::OnOrientationChanged);
@@ -498,8 +506,15 @@ void SDL_WinRTApp::OnWindowSizeChanged(CoreWindow ^ sender, WindowSizeChangedEve
             (WINRT_GlobalSDLWindow ? "yes" : "no"));
 #endif
 
-    WINRT_ProcessWindowSizeChange();
+    WINRT_ProcessWindowSizeChange("resize");
 }
+
+#if NTDDI_VERSION > NTDDI_WIN8
+void SDL_WinRTApp::OnLogicalDpiChanged(DisplayInformation ^ sender, Object ^ args)
+{
+    WINRT_ProcessWindowSizeChange("dpi");
+}
+#endif
 
 void SDL_WinRTApp::OnVisibilityChanged(CoreWindow ^ sender, VisibilityChangedEventArgs ^ args)
 {
@@ -558,6 +573,9 @@ void SDL_WinRTApp::OnWindowActivated(CoreWindow ^ sender, WindowActivatedEventAr
     SDL_Window *window = WINRT_GlobalSDLWindow;
     if (window) {
         if (args->WindowActivationState != CoreWindowActivationState::Deactivated) {
+            if (SDL_GetWinRTDeviceFamily() == SDL_WINRT_DEVICEFAMILY_XBOX) {
+                WINRT_ProcessWindowSizeChange("activated");
+            }
             SDL_SendWindowEvent(window, SDL_EVENT_WINDOW_SHOWN, 0, 0);
             if (SDL_GetKeyboardFocus() != window) {
                 SDL_SetKeyboardFocus(window);

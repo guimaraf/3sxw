@@ -1,8 +1,7 @@
 name: Build (Xbox UWP)
 
 on:
-  push:
-    branches: [ "UWP" ]
+  # UWP builds are local; GitHub builds require an explicit manual request.
   workflow_dispatch:
 
 permissions:

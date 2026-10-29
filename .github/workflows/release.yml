@@ -1,10 +1,8 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
-      - '[0-9]*'
+  # On the UWP branch, pushing versions/tags must not start remote builds.
+  workflow_dispatch:
 
 permissions:
   contents: write

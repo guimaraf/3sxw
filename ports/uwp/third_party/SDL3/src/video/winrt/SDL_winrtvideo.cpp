@@ -118,7 +118,7 @@ static void WINRT_GetGamingDeviceMaxResolution(Uint32 *max_w, Uint32 *max_h)
 #else
     GAMING_DEVICE_MODEL_INFORMATION info;
     SDL_zero(info);
-    if (!GetGamingDeviceModelInformation(&info)) {
+    if (FAILED(GetGamingDeviceModelInformation(&info))) {
         *max_w = 1920;
         *max_h = 1080;
         return;
@@ -164,7 +164,7 @@ static void WINRT_LogOutputResolutionOnce(void)
 #ifdef SDL_WINRT_HAVE_GAMING_DEVICE_INFORMATION
     GAMING_DEVICE_MODEL_INFORMATION info;
     SDL_zero(info);
-    if (GetGamingDeviceModelInformation(&info)) {
+    if (SUCCEEDED(GetGamingDeviceModelInformation(&info))) {
         (void)SDL_snprintf(model, sizeof(model), "vendorId=0x%X deviceId=0x%X",
                            (unsigned)info.vendorId, (unsigned)info.deviceId);
     } else {
@@ -174,13 +174,13 @@ static void WINRT_LogOutputResolutionOnce(void)
     SDL_strlcpy(model, "gaming device API unavailable", sizeof(model));
 #endif
     if (WINRT_CachedDisplayModeQueryFailed) {
-        SDL_Log("WinRT: Failed to get HDMI display mode (%s), using device maximum: %dx%d",
+        SDL_Log("[UWP_RENDER] WinRT: Failed to get HDMI display mode (%s), using device maximum: %dx%d",
                 model, WINRT_CachedOutputWidth, WINRT_CachedOutputHeight);
     } else if (WINRT_CachedUsingDisplayResolution) {
-        SDL_Log("WinRT: Using display resolution (%s): %dx%d", model,
+        SDL_Log("[UWP_RENDER] WinRT: Using display resolution (%s): %dx%d", model,
                 WINRT_CachedOutputWidth, WINRT_CachedOutputHeight);
     } else {
-        SDL_Log("WinRT: Using device maximum resolution (%s): %dx%d", model,
+        SDL_Log("[UWP_RENDER] WinRT: Using device maximum resolution (%s): %dx%d", model,
                 WINRT_CachedOutputWidth, WINRT_CachedOutputHeight);
     }
 }
@@ -275,13 +275,44 @@ extern "C" bool WINRT_TVOutputSizeOverridesActive(void)
     return SDL_GetWinRTDeviceFamily() == SDL_WINRT_DEVICEFAMILY_XBOX;
 }
 
+// 3SXW UWP: keep native view units distinct from the output's physical pixels.
+extern "C" void WINRT_RefreshWindowGeometry(SDL_Window *window, const char *reason)
+{
+    if (SDL_GetWinRTDeviceFamily() != SDL_WINRT_DEVICEFAMILY_XBOX || !window) {
+        return;
+    }
+    WINRT_OutputSizeResolved = false;
+    WINRT_CachedOutputLogged = false;
+    WINRT_ResolveOutputSize();
+    WINRT_ApplyOutputSizeToPrimaryDisplay(SDL_GetVideoDevice());
+
+#if NTDDI_VERSION >= NTDDI_WIN10
+    SDL_WindowData *data = window->internal;
+    if (data->coreWindow.Get() && data->appView) {
+        const Rect bounds = data->coreWindow->Bounds;
+        const Rect visible = data->appView->VisibleBounds;
+        DisplayInformation ^ info = DisplayInformation::GetForCurrentView();
+        SDL_Log("[UWP_RENDER] winrt_view reason=%s core_dips=%.1f,%.1f,%.1f,%.1f "
+                "visible_dips=%.1f,%.1f,%.1f,%.1f dpi=%.1f raw_scale=%.3f raw_screen=%ux%u "
+                "output_pixels=%dx%d fullscreen=%d bounds_mode=%d hdmi_source=%d hdmi_query_failed=%d",
+                reason, bounds.X, bounds.Y, bounds.Width, bounds.Height,
+                visible.X, visible.Y, visible.Width, visible.Height,
+                info->LogicalDpi, info->RawPixelsPerViewPixel,
+                (unsigned int)info->ScreenWidthInRawPixels, (unsigned int)info->ScreenHeightInRawPixels,
+                WINRT_CachedOutputWidth, WINRT_CachedOutputHeight,
+                (int)data->appView->IsFullScreenMode, (int)data->appView->DesiredBoundsMode,
+                (int)WINRT_CachedUsingDisplayResolution, (int)WINRT_CachedDisplayModeQueryFailed);
+    }
+#endif
+}
+
 extern "C" void WINRT_TVOutputOverrideApplyToWindow(SDL_Window *window)
 {
     if (!WINRT_TVOutputSizeOverridesActive() || !window) {
         return;
     }
-    window->last_pixel_w = WINRT_CachedOutputWidth;
-    window->last_pixel_h = WINRT_CachedOutputHeight;
+    /* 3SXW UWP: SDL_SendWindowEvent owns last_pixel_w/h. Updating them here
+     * would suppress PIXEL_SIZE_CHANGED and leave the swap chain stale. */
     window->w = (int)SDL_lroundf(WINRT_PHYSICAL_PIXELS_TO_DIPS((float)WINRT_CachedOutputWidth));
     window->h = (int)SDL_lroundf(WINRT_PHYSICAL_PIXELS_TO_DIPS((float)WINRT_CachedOutputHeight));
 }
@@ -896,6 +927,16 @@ bool WINRT_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Properti
 #ifndef __XBOXSERIES__
     }
 #endif
+    // 3SXW UWP: use the whole Xbox view; safe-area layout must not inset the game.
+#if NTDDI_VERSION >= NTDDI_WIN10
+    if (SDL_GetWinRTDeviceFamily() == SDL_WINRT_DEVICEFAMILY_XBOX && data->appView) {
+        const bool boundsSet = data->appView->SetDesiredBoundsMode(ApplicationViewBoundsMode::UseCoreWindow);
+        const bool fullscreenSet = data->appView->IsFullScreenMode || data->appView->TryEnterFullScreenMode();
+        SDL_Log("[UWP_RENDER] winrt_view_policy bounds_set=%d fullscreen_set=%d",
+                (int)boundsSet, (int)fullscreenSet);
+        WINRT_RefreshWindowGeometry(window, "create");
+    }
+#endif
     SDL_SetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WINRT_WINDOW_POINTER, reinterpret_cast<IInspectable *>(data->coreWindow.Get()));
 
     if (WINRT_XAMLWasEnabled) {
@@ -1061,6 +1102,9 @@ SDL_FullscreenResult WINRT_SetWindowFullscreen(SDL_VideoDevice *_this, SDL_Windo
     bool isWindowActive = WINRT_IsCoreWindowActive(data->coreWindow.Get());
     if (isWindowActive) {
         if (fullscreen) {
+            if (SDL_GetWinRTDeviceFamily() == SDL_WINRT_DEVICEFAMILY_XBOX) {
+                data->appView->SetDesiredBoundsMode(ApplicationViewBoundsMode::UseCoreWindow);
+            }
             if (!data->appView->IsFullScreenMode) {
                 if (data->appView->TryEnterFullScreenMode()) {
                     return SDL_FULLSCREEN_SUCCEEDED;

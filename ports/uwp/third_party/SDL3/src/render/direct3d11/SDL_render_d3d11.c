@@ -189,6 +189,7 @@ typedef struct
     Uint64 diagnosticPresentCalls;
     Uint64 diagnosticPresentBusy;
     Uint64 diagnosticPresentFailures;
+    Uint64 diagnosticPresentSlow;
     Uint64 diagnosticPresentMaxNS;
 #endif
     ID3D11RenderTargetView *mainRenderTargetView;
@@ -967,6 +968,13 @@ static HRESULT D3D11_CreateSwapChain(SDL_Renderer *renderer, int w, int h)
         swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL; // All Windows Store apps must use this SwapEffect.
     }
 #endif // SDL_WINAPI_FAMILY_PHONE
+#ifdef SDL_PLATFORM_WINRT
+    /* 3SXW UWP: cover the CoreWindow even when its compositor target is larger
+     * than the buffer. The game aspect ratio is handled inside this surface. */
+    if (coreWindow) {
+        swapChainDesc.Scaling = DXGI_SCALING_STRETCH;
+    }
+#endif
     swapChainDesc.Flags = data->swapChainFlags;
 
     if (coreWindow) {
@@ -1118,11 +1126,8 @@ static HRESULT D3D11_CreateWindowSizeDependentResources(SDL_Renderer *renderer)
     /* The width and height of the swap chain must be based on the display's
      * non-rotated size.
      */
-#ifdef SDL_PLATFORM_WINRT
-    SDL_GetWindowSize(renderer->window, &w, &h);
-#else
+    /* 3SXW UWP: swap-chain buffers use physical pixels, not CoreWindow DIPs. */
     SDL_GetWindowSizeInPixels(renderer->window, &w, &h);
-#endif
     data->rotation = D3D11_GetCurrentRotation();
     // SDL_Log("%s: windowSize={%d,%d}, orientation=%d", SDL_FUNCTION, w, h, (int)data->rotation);
     if (D3D11_IsDisplayRotated90Degrees(data->rotation)) {
@@ -1195,9 +1200,19 @@ static HRESULT D3D11_CreateWindowSizeDependentResources(SDL_Renderer *renderer)
 #ifdef SDL_PLATFORM_WINRT
     {
         D3D11_TEXTURE2D_DESC diagnosticDesc;
+        DXGI_SWAP_CHAIN_DESC1 diagnosticSwapChain;
+        int logicalW = 0, logicalH = 0;
+        int pixelW = 0, pixelH = 0;
+        SDL_zero(diagnosticSwapChain);
+        const HRESULT diagnosticResult = IDXGISwapChain1_GetDesc1(data->swapChain, &diagnosticSwapChain);
+        SDL_GetWindowSize(renderer->window, &logicalW, &logicalH);
+        SDL_GetWindowSizeInPixels(renderer->window, &pixelW, &pixelH);
         ID3D11Texture2D_GetDesc(backBuffer, &diagnosticDesc);
-        SDL_Log("[UWP_RENDER] d3d11_backbuffer requested=%dx%d actual=%ux%u format=%u rotation=%d",
-                w, h, diagnosticDesc.Width, diagnosticDesc.Height, (unsigned int)diagnosticDesc.Format, (int)data->rotation);
+        SDL_Log("[UWP_RENDER] d3d11_backbuffer requested=%dx%d actual=%ux%u format=%u rotation=%d "
+                "window_logical=%dx%d window_pixels=%dx%d swapchain=%ux%u scaling=%u desc_hr=0x%08lX",
+                w, h, diagnosticDesc.Width, diagnosticDesc.Height, (unsigned int)diagnosticDesc.Format, (int)data->rotation,
+                logicalW, logicalH, pixelW, pixelH, diagnosticSwapChain.Width, diagnosticSwapChain.Height,
+                (unsigned int)diagnosticSwapChain.Scaling, (unsigned long)diagnosticResult);
     }
 #endif
     result = ID3D11Device_CreateRenderTargetView(data->d3dDevice,
@@ -3069,14 +3084,17 @@ static bool D3D11_RenderPresent(SDL_Renderer *renderer)
     data->diagnosticPresentBusy += result == DXGI_ERROR_WAS_STILL_DRAWING;
     data->diagnosticPresentFailures += FAILED(result) && result != DXGI_ERROR_WAS_STILL_DRAWING;
     data->diagnosticPresentMaxNS = SDL_max(data->diagnosticPresentMaxNS, diagnosticPresentNS);
+    data->diagnosticPresentSlow += diagnosticPresentNS > 40000000;
     if (data->diagnosticPresentCalls == 1 || data->diagnosticPresentCalls % 120 == 0 ||
+        (diagnosticPresentNS > 40000000 && data->diagnosticPresentSlow <= 16) ||
         (result == DXGI_ERROR_WAS_STILL_DRAWING && data->diagnosticPresentBusy <= 8)) {
-        SDL_Log("[UWP_RENDER] d3d11_present calls=%llu busy=%llu failures=%llu "
+        SDL_Log("[UWP_RENDER] d3d11_present calls=%llu busy=%llu failures=%llu slow_over_40ms=%llu "
                 "sync_interval=%u present_flags=0x%08X swap_chain_flags=0x%08X "
                 "hr=0x%08lX last_ms=%.3f max_since_log_ms=%.3f",
                 (unsigned long long)data->diagnosticPresentCalls,
                 (unsigned long long)data->diagnosticPresentBusy,
                 (unsigned long long)data->diagnosticPresentFailures,
+                (unsigned long long)data->diagnosticPresentSlow,
                 data->syncInterval, data->presentFlags, data->swapChainFlags,
                 (unsigned long)result, (double)diagnosticPresentNS / 1e6,
                 (double)data->diagnosticPresentMaxNS / 1e6);

@@ -77,7 +77,7 @@ viewport to check whether the menu scale recovers after successful shader setup.
 
 ## Xbox One performance diagnostics
 
-`uwp_render_check.log` version 6 uses the `UWP Diagnostic Writer` thread for
+`uwp_render_check.log` version 9 uses the `UWP Diagnostic Writer` thread for
 file writes and flushes. The main thread only queues bounded messages; it does
 not wait for disk I/O or queue space. The queue holds 128 messages and occupies
 516 KiB, including an extra ring slot to distinguish full from empty.
@@ -242,6 +242,109 @@ Wait five seconds, then copy both diagnostic logs before restarting the app.
 Expect render_trace_version=6. External high-speed measurement is still required
 for physical-button-to-visible-response latency. No build or hardware validation
 was performed by the agent.
+
+### Version 7: TASK_GAME subphases
+
+This test preserves VSync, input processing, texture reuse and simulation order.
+It times the existing Game_Task calls without moving work to another thread.
+`[UWP_PERF] game_phase` details operations taking at least 1 ms on the same
+slow frames selected by the existing game profiler (up to eight per 120 frames).
+Durations/call counts aggregate within one frame, including repeated sysFF
+iterations. `dispatch` is inclusive: it contains gameplay subphases and must not
+be added to their times. Cache preparation, sprite cache update, load request
+processing, rumble, screen/background checks and sound-code display are separate
+task phases. During Game2_1, players, stage update, management, background/player
+drawing, basic effects, VRAM purges and hit checking are also measured. Other
+gameplay states remain represented by dispatch. HUD and other uninstrumented
+work may account for a difference between dispatch and its listed subphases.
+These are elapsed times and include waits; they do not identify CPU usage alone.
+
+`d3d11_present` now includes cumulative `slow_over_40ms`. The first sixteen calls
+above 40 ms receive immediate records, in addition to the existing periodic and
+busy-result records. This helps correlate exceptional driver waits with nearby
+game/input frames; driver call IDs still differ from game frame IDs.
+Input tracing and its rate limits remain unchanged. Expect render_trace_version=7.
+For this test, play from character selection through at least two full fights,
+noting first-round pauses and any later hitch. Wait five seconds and collect both
+logs before restarting. Build and runtime verification remain local.
+
+### Version 8: console fullscreen presentation
+
+**Console result: this attempt did not remove the outer margins.** Its 4:3
+rectangle policy remains in version 9, but fullscreen flags and the rectangle
+alone did not establish the physical presentation size. The available Downloads
+render log has `render_trace_version=7`, build `Oct 29 2026 18:29:06`; it cannot
+be used as runtime evidence for version 8 or version 9.
+
+UWP ignores saved desktop window dimensions when a valid desktop display mode is
+available and requests fullscreen at that reported size. It does not force a
+1920x1080 resolution. Fullscreen is requested again on focus gain; keyboard
+fullscreen toggles are disabled on UWP. Pixel-size events refresh the screen
+target. The UWP path uses nearest filtering, a full-height 4:3 fit on widescreen
+outputs and no bezels, ignoring saved stretch/integer/soft-linear options without
+overwriting the configuration file. Desktop options remain unchanged.
+
+The game area is 960x720 at a 1280x720 output or 1440x1080 at 1920x1080, with only
+side bars. `[UWP_RENDER] presentation policy=fullscreen_4_3` records actual window
+pixel dimensions, canvas and destination rectangle on size changes. Verify the
+whole console view is occupied and no top/bottom margins remain. A reported
+fullscreen flag alone does not prove the physical output geometry; compare the
+image with these dimensions. Expect render_trace_version=8. VSync and the existing
+phase/input diagnostics are retained. Runtime validation remains on console.
+
+### Version 9: physical-pixel swap chain and full Xbox view
+
+Static inspection found that the WinRT D3D11 backend sized its swap chain with
+`SDL_GetWindowSize` (logical units), while SDL's renderer and screen texture use
+`SDL_GetWindowSizeInPixels`. The CoreWindow swap chain also selected
+`DXGI_SCALING_NONE`, leaving a smaller buffer unscaled in a larger presentation
+target. This is a concrete mismatch in the presentation chain; the precise
+origin of the centered outer margins still requires the new console logs.
+
+The backend now creates/resizes buffers in physical pixels and selects
+`DXGI_SCALING_STRETCH` for WinRT CoreWindow presentation. This fits the composed
+surface to the view; the game remains inside its full-height 4:3 rectangle, with
+side bars included in that surface. The desktop HWND path is unchanged. The Xbox
+view requests `UseCoreWindow` bounds and native fullscreen before renderer
+creation. HDMI/output geometry is refreshed on resize, orientation, DPI changes
+and activation. The Xbox override no longer writes SDL's `last_pixel_w/h` before
+event delivery, which could suppress `PIXEL_SIZE_CHANGED` and leave old buffers
+in use. Gaming-device queries now check their HRESULT with `SUCCEEDED`/`FAILED`.
+
+No shaders, feature levels, VSync settings, input timing or texture-cache policy
+are changed. Saved presentation options in `LocalState/data/config` are logged
+as `saved_presentation` and overridden in memory by the existing UWP policy;
+the file is not rewritten by this presentation change. No settings reset is
+required. Native-view and final-viewport diagnostics are enabled without verbose
+per-frame logging.
+
+After a local build and install, verify menus and gameplay, then leave/re-enter
+the app once to exercise activation. Wait five seconds before collecting
+`uwp_render_check.log` and `uwp_resource_check.log` from the same session. Check:
+
+- The render header says `render_trace_version=9` and identifies the new build.
+- `winrt_view_policy` reports the bounds/fullscreen request results. `winrt_view`
+  records CoreWindow/VisibleBounds in DIPs, DPI, raw scale, raw screen pixels,
+  resolved output pixels, native fullscreen and the bounds mode. Logical
+  `1280x720` can be valid for a physical `1920x1080` view at 150% scale.
+- For a resolved 1080p output, `d3d11_backbuffer` should report
+  `requested=1920x1080 actual=1920x1080`, `window_pixels=1920x1080` and
+  `scaling=0` (`DXGI_SCALING_STRETCH`). A mode with `refresh_hz=0` still means
+  unknown refresh rate; this patch does not infer 60 Hz from it.
+- `presentation` should report `output=1920x1080 canvas=1920x1080` and
+  `rect=240.0,0.0,1440.0,1080.0`. `stage=window_presentation` records the final
+  viewport, scale, clip and logical-presentation state on the first frame and
+  size changes. Normally these are viewport `0,0,1920,1080`, scale `1,1`, clip
+  disabled and logical mode `0` (disabled).
+- Confirm on the TV/capture that content reaches the top and bottom, with only
+  side bars. If the resolved output is 720p, inspect native/raw geometry and the
+  output-resolution source before treating it as 1080p evidence. The swap-chain
+  scaling policy should still cover the full view; a log of buffer dimensions
+  alone cannot establish physical TV geometry.
+
+Only static verification was performed by the agent. No build, shader
+compilation or console validation was run; the visual result is pending the
+user's Xbox test.
 
 ## Packaging and signing
 
