@@ -38,6 +38,9 @@ extern u32 _ag_06_char_table[];
 extern u32 _ag_07_char_table[];
 extern u32 _ag_face_panel_table[];
 extern u32 _ef01_char_table[];
+#if defined(SF3_UWP)
+u32 uwp_warm_hit_effect_table(void);
+#endif
 extern u32 _plef_char_table[];
 extern u32 _ef13_char_table[];
 extern u32 _ef13_catt_table[];

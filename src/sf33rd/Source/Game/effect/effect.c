@@ -5,6 +5,10 @@
 
 #include "sf33rd/Source/Game/effect/effect.h"
 #include "common.h"
+#if defined(SF3_UWP)
+#include "port/sdl/sdl_app.h"
+#endif
+
 #include "port/utils.h"
 #include "sf33rd/AcrSDK/ps2/flps2debug.h"
 #include "sf33rd/Source/Game/debug/Debug.h"
@@ -41,7 +45,16 @@ void move_effect_work(s16 index) {
 
         if (c_addr->timing != exec_tm[index]) {
             c_addr->timing = exec_tm[index];
+#if defined(SF3_UWP)
+            const int effect_id = c_addr->id;
+            const int routine = c_addr->routine_no[0];
+            const Uint64 effect_start_ns = SDL_GetTicksNS();
+#endif
             effmovejptbl[c_addr->id](c_addr);
+#if defined(SF3_UWP)
+            SDLApp_RecordUWPCombatDetail("effect_callback", effect_id, index, routine,
+                                         SDL_GetTicksNS() - effect_start_ns);
+#endif
         }
     }
 }

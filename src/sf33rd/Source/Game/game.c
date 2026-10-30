@@ -60,6 +60,7 @@
 #include "sf33rd/Source/Game/ui/sc_sub.h"
 #include "structs.h"
 #if defined(SF3_UWP)
+#include "bin2obj/char_table.h"
 #include "port/sdl/sdl_app.h"
 #define UWP_GAME_PHASE(name, call) do { \
     const Uint64 phase_start_ns = SDL_GetTicksNS(); \
@@ -512,6 +513,17 @@ void Game2_0() {
 }
 
 void Game2_1() {
+#if defined(SF3_UWP)
+    static int hit_effect_warmed = 0;
+    if (!hit_effect_warmed) {
+        const Uint64 start_ns = SDL_GetTicksNS();
+        const u32 checksum = uwp_warm_hit_effect_table();
+        const Uint64 elapsed_ns = SDL_GetTicksNS() - start_ns;
+        hit_effect_warmed = 1;
+        SDL_Log("[UWP_COMBAT] kind=hit_effect_table_warmup elapsed_ms=%.3f checksum=0x%08X",
+                (double)elapsed_ns / 1000000.0, (unsigned int)checksum);
+    }
+#endif
     mpp_w.inGame = true;
 
     if (Game_pause != 0x81) {
@@ -537,7 +549,7 @@ void Game2_1() {
         vital_cont_main();
         player_face();
         player_name();
-        combo_cont_main();
+        UWP_GAME_PHASE("combo_hud", combo_cont_main());
         stngauge_cont_main();
         spgauge_cont_main();
         Sa_frame_Write();

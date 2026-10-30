@@ -6,9 +6,13 @@
 #include "port/sdl/sdl_game_renderer.h"
 #if defined(SF3_UWP)
 #include "port/debug/debug_log.h"
-void SDLApp_TraceUWPInputEvent(const SDL_Event* event);
-void SDLApp_TraceUWPInputSample(SDL_Gamepad* pad, int slot, bool eligible);
-void SDLApp_TraceUWPInputCopy(Uint32 p1, Uint32 p2);
+/* elapsed_ns=0 marks an event; timed calls below 1 ms are omitted. */
+void SDLApp_RecordUWPCombatDetail(const char* kind, int subject, int detail, int value, Uint64 elapsed_ns);
+enum { UWP_ATTACK_WRAPPER, UWP_ATTACK_SELECTED, UWP_ATTACK_SHARED, UWP_ATTACK_LANDING,
+       UWP_ATTACK_ANIMATION, UWP_ATTACK_MARKS };
+void SDLApp_UWPAttackTraceBegin(int character, int subject);
+void SDLApp_UWPAttackTraceMark(int mark);
+void SDLApp_UWPAttackTraceEnd(void);
 void SDLApp_RecordUWPGamePhase(const char* name, Uint64 elapsed_ns);
 void SDLApp_RecordUWPGameTiming(const DebugFrameTiming* frame, const DebugStepStats* steps,
                                const DebugTaskStats* tasks);

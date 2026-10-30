@@ -77,7 +77,30 @@ viewport to check whether the menu scale recovers after successful shader setup.
 
 ## Xbox One performance diagnostics
 
-`uwp_render_check.log` version 9 uses the `UWP Diagnostic Writer` thread for
+Persistent diagnostic output is currently suspended. See `UWP Future Fix.md`
+at the repository root for the investigation history and stopping point.
+`include/port/uwp_diagnostics.h` sets `SF3_UWP_DIAGNOSTIC_DISK_LOGGING=0`:
+no render/resource diagnostic files or desktop debug CSV/session files are
+created by the UWP build. Existing console logs are not deleted. Measurement
+hooks and the effect-table warm-up remain; the diagnostic writer is not started.
+The version-specific logging instructions below are historical and require
+explicitly restoring diagnostic output before use.
+
+Version 17 experimentally reads the complete `_ef01_char_table` once per
+process, on the first `Game2_1` update. The `[UWP_COMBAT]` record with
+`kind=hit_effect_table_warmup` reports the read duration and checksum. This
+does not spawn an effect or play audio; it tests whether touching these data
+early changes the first-hit stall, and does not guarantee their residency.
+An attract-mode fight can perform the warm-up before a player starts a match.
+
+Version 18 adds `attack_entry_trace` for initial Ken and Hugo extra attacks at
+state 16/0. Milestones are elapsed milliseconds from the dispatch start; -1
+means a milestone was not reached. CPU time uses `GetThreadTimes` across the
+call and may have coarse resolution; `cpu_valid=0` means it was unavailable.
+The trace includes its own clock and bookkeeping overhead. The version 17
+table warm-up remains enabled.
+
+`uwp_render_check.log` version 18 uses the `UWP Diagnostic Writer` thread for
 file writes and flushes. The main thread only queues bounded messages; it does
 not wait for disk I/O or queue space. The queue holds 128 messages and occupies
 516 KiB, including an extra ring slot to distinguish full from empty.
@@ -345,6 +368,289 @@ the app once to exercise activation. Wait five seconds before collecting
 Only static verification was performed by the agent. No build, shader
 compilation or console validation was run; the visual result is pending the
 user's Xbox test.
+
+### Version 10: first-impact diagnostics, without input tracing
+
+The UWP event/sample/command-copy correlation and `input`/`input_window` records
+are removed. Controller polling, command copying, screenshot chords and their
+order are unchanged. Existing coarse game-step timings, including pad/input
+time, remain available. Version 9 presentation, VSync, shaders and texture reuse
+are unchanged; this version diagnoses the stall rather than applying a fix.
+
+`[UWP_COMBAT]` samples are collected only in the gameplay state (`G=2,2,...`),
+then emitted after EndFrame so their `frame` matches the existing performance
+records. Each sample includes a monotonic `at_ns`, `kind`, `subject`, `detail`,
+`value`, `elapsed_ms` and `event`. Event records (`event=1`) mark occurrences;
+their zero duration does not mean the operation took zero time. Timed records
+are retained only at or above 1 ms and are inclusive, including possible waits.
+Nested measurements must not be added together.
+
+| Kind | Subject | Detail | Value |
+| --- | --- | --- | --- |
+| `player_total` | player slot | routine on entry | internal character ID |
+| `player_commands` | player slot | routine on entry | internal character ID |
+| `player_routine` | player slot | routine immediately before dispatch | internal character ID |
+| `vital_change` | player slot | vitality before Player_move | vitality after |
+| `combo_change` | player slot | combo count before Player_move | combo count after |
+| `hit_combo` | attacker slot | defender slot | attack kind |
+| `first_attack` | combo-control player index | internal character ID | first_attack state |
+| `first_attack_notice` | combo-control player index | notice kind (4) | 0 |
+| `effect_callback` | effect ID | effect group | effect routine on entry |
+| `impact_spawn` / `impact_init` | source work ID | hit-mark index | mark type (`mkst`) |
+| `impact_sound` | effect master ID | requested sound ID | 0 |
+| `players_setup` / `players_dispatch` | -1 (both players) | controller state `[0]` | controller state `[1]` |
+| `players_collision_state` | -1 | 0 | 0 |
+| `player_hit_push` | player slot | 0 | 0 |
+| `players_position` / `players_afterimage` | -1 | 0 | 0 |
+
+Player slots are zero-based; internal character IDs are not select-screen
+numbers. Player routine bytes `[0..3]` are packed from most to least significant
+byte and also printed as `detail_hex`. `player_commands` measures waza_check or
+key_thru; `player_routine` measures the dispatched player routine, including
+attack/reaction work. `impact_spawn` means effect 02 was allocated successfully;
+it does not itself prove unguarded damage. `hit_combo` marks add_combo_work, while
+the first-attack notice has its own marker. `combo_hud` is also measured as a
+game phase. Events can precede a slow reaction by a frame, so inspect nearby
+frames rather than requiring all markers on the same frame.
+
+Storage is fixed: 64 details per frame, up to 512 events and 1024 timed records
+per application session, independent of the older slow-frame detail quota.
+`[UWP_COMBAT] limits` reports omitted samples every 120 frames when necessary.
+Samples use the existing bounded asynchronous logger; no synchronous file writes
+or dynamic allocations were added to these combat hooks. Timing and logging do
+add overhead, so treat this as a diagnostic build.
+
+For the local Xbox test, confirm `render_trace_version=10`. Start versus with the
+same characters/stage, land one isolated opening hit, pause briefly, and repeat
+the same hit several times. Return to character select and repeat the matchup
+without closing the app. Avoid additional matches before collecting both logs
+so the event budget remains focused on first-use behavior. Wait five seconds
+before collection. Correlate the first `hit_combo`, `impact_spawn`, vitality and
+`first_attack` markers with `player_routine`, effect and sound timings, including
+the following few frames. Compare the opening hit in both matchups. No verbose
+render logging is required. Build and Xbox validation are performed by the user;
+the agent performed static checks only and did not compile shaders or run a build.
+
+### Version 11: narrow down Hugo's pre-impact routine
+
+The version 10 test located a 101 ms call in Hugo's routine `04,00,04,01`,
+19 frames before the first hit. This dispatches Player_normal / Normal_04000,
+which updates motion and animation, rather than the Player_attack branch.
+Version 11 retains the impact markers and removed input tracing, and adds:
+
+| Kind | Subject | Detail | Value |
+| --- | --- | --- | --- |
+| `active_state` | player slot | routine `[1]` before dispatch | internal character ID |
+| `active_gauges` | player slot | routine `[1]` | internal character ID |
+| `normal_state` | player slot | routine `[2] << 8` plus `[3]`, before dispatch | internal character ID |
+| `normal04_speed` / `normal04_position` / `normal04_animation` | player slot | animation char_index on entry | internal character ID |
+| `animation_opcode` / `animation_opcode_alt` | source work ID | animation command opcode | work_id |
+| `animation_pattern` | source work ID | cg_ix on entry | work_id |
+| `animation_effect_init` | source work ID | effect ID before init | work_id |
+| `animation_sound` | source work ID | cg_se before sound request/filter | work_id |
+
+Animation command timings cover both decoding paths. Each decoder executes once
+with its original return-value branch. Pattern timing includes its nested effect,
+sound and hit-area setup calls; durations remain inclusive and must not be added
+together. Timing records below 1 ms are still omitted, and version 10's budgets
+and asynchronous output remain in effect. No routine order, input, shaders,
+VSync, resolution or gameplay rules have been changed.
+
+Use the same two-match test as before: launch the app, select the same matchup
+and stage, land one isolated hit, return to character selection, and repeat once
+without closing the app. Preserve the same approach/movement before the hit.
+Wait five seconds and collect both logs before restarting. Confirm
+`render_trace_version=11`. Compare the pre-impact slow routine with the new
+nested timings and the corresponding repeated movement. No build or shader
+compilation was performed by the agent; Xbox validation remains local.
+
+### Version 12: unique gamepad sources and resident-sound diagnostics
+
+UWP selects WGI and explicitly disables XInput before initializing gamepads,
+using override-priority hints. The older identical-instance-ID check remains;
+after opening a pad, assignment also rejects an already assigned handle or
+instance ID. Two controllers of the same model remain valid: names, VID/PID or
+GUIDs are not used as unique physical identities. This addresses possible
+cross-provider duplication, but requires validation with the wired controller
+and wireless controller on the Xbox One S. Desktop provider selection is unchanged.
+
+`[UWP_PAD] providers` reports hint selection results; `assigned` reports the
+zero-based slot, SDL instance ID, name and path. `duplicate_event`, `duplicate_open`
+and `removed` describe lifecycle events only. Per-button input tracing remains
+disabled. Confirm that two distinct instance IDs occupy slots 0 and 1, and that
+each physical controller moves only its corresponding selection cursor. Then
+test reconnecting each controller separately without filling both slots with
+one device. Slot order follows connection/enumeration order, not a saved physical
+controller identity; both controllers must remain independently usable.
+
+Sound effects already have resident sample storage: loaded banks are copied by
+SPU_Upload into 2 MiB of emulated SPU RAM; starting a voice uses an address in
+that RAM. The normal CSE/TSB voice-start path does not open an individual audio
+file per hit. ADX music has a separate loader/buffer pool. Therefore this version
+does not add a second effects-file cache or claim that disk I/O caused the stall.
+Runtime ADPCM decoding and synchronization can still cost time. In particular,
+the SPU audio callback holds soundLock while generating requested samples and
+submitting stream data; main-thread sound operations share that mutex.
+
+`[UWP_AUDIO]` records calls taking at least 1 ms, with separate per-session
+limits of 128 records per category, emitted after releasing soundLock:
+
+- `voice_start`: bank/note, result (1 started, 0 filtered, -1 no free voice),
+  `lock_wait_ms`, `locked_work_ms` (including unlock overhead), and `total_ms`.
+- `spu_upload`: destination/byte count and the same wait/work/total split.
+- `tsb_request`: bank/code, result, and inclusive request time. This wraps the
+  TSB request, not an additional disk read; nested voice times are not additive.
+
+The voice and upload diagnostics do not change locking, decoding, bank loading
+or playback order. No logging was added directly to the audio callback. If a
+long request is mainly lock wait, another file cache would not address that wait;
+if new bank uploads coincide with first use, investigate their loading source
+and consider preloading only the required banks before gameplay. First confirm
+`render_trace_version=12`, independent controllers, and then repeat the same
+two-match, one-hit test. Wait five seconds before collecting both logs. The agent
+performed static verification only, with no build or shader compilation.
+
+### Version 13: collision preparation, comparisons and debug drawing
+
+This version retains the version 12 controller/audio policy and combat markers.
+It measures collision behavior without removing duplicate queue entries,
+changing box coordinates, skipping simulation steps or enabling debug drawing.
+`[UWP_COLLISION]` contains main-thread totals reset at SDLApp_BeginFrame and
+emitted with the same frame ID as the existing combat/performance records:
+
+| Fields | Meaning |
+| --- | --- |
+| `updates`, `update_ms` | set_jugde_area calls/time for player slots 0, 1, and all other work objects |
+| `passes` | hit_check_main_process calls within the rendered frame |
+| `queued` | accepted queue insertions across all passes in the frame |
+| `duplicates` | accepted insertions whose WORK pointer was already in the current queue |
+| `rejected` | insertions rejected because the queue is full or cg_hit_ix is zero |
+| `queue_peak` | maximum queue occupancy before it is cleared; not the frame insertion total |
+| `attack_pairs`, `catch_pairs` | candidate-pair loop visits after initial self/result filters; not unique pairs or successful overlaps |
+| `rect_tests` | actual hit_check_subroutine calls, including attack, catch and body-contact callers |
+| `catch_ms`, `attack_ms` | aggregate catch/attack comparison phase times |
+| `apply_ms` | set_judge_result time, including application of the result and any nested work |
+| `extra_ms`, `clear_ms` | check_result_extra and clear_hit_queue times |
+| `draw_calls` | debug box-renderer calls, even when no boxes are enabled |
+| `draw_boxes` | box submissions selected by ja_disp_bit |
+| `draw_quads` | debug polygon submissions, including fill/outline and marker quads |
+| `draw_mask`, `draw_ms` | OR of effective debug display masks and CPU time in set_judge_area_sprite |
+
+The collision queue is bounded to 31 work objects and cleared by the existing
+logic after each pass. Duplicate counting scans only the current bounded queue
+and does not deduplicate it. Rectangle tests increment a counter without reading
+the clock per test. Preparation and phase timings add diagnostic clock reads.
+Debug drawing timings describe CPU command submission, not GPU execution.
+Durations are inclusive where calls nest; do not add nested timings together.
+Multiple passes can be intentional simulation work: compare their counts with
+the existing game-phase call counts before treating repetition as a fault.
+
+Logs are sampled on gameplay frames over 20 ms, frames with retained combat
+details, and every 120th frame. The independent session budget is 1024 collision
+records, followed by a `limit_reached` marker. Per-frame counters use fixed storage
+and the existing asynchronous logger. There is no per-rectangle log output.
+
+Confirm `render_trace_version=13`, then repeat the two-match test with the same
+characters, stage, attack button and approach movement. Land one isolated hit in
+each match; return to character select between them without closing the app.
+Wait five seconds before collecting both logs. Compare counters and times around
+the first hit and preceding slow frames. In particular, distinguish a large
+comparison count/time from a slow result-application call, and verify whether
+debug polygons are submitted at all. No build or shader compilation was run by
+the agent; Xbox validation is performed by the user.
+
+### Version 14: attack internals; collision tracing removed
+
+Version 13 found one collision pass, two queued objects, no duplicate entries,
+one rectangle test and no debug box drawing on the 102.56 ms frame. Attack
+comparison took approximately 0.001 ms; Player_attack took 88.55 ms. This test
+does not support excessive box work as the cause of that frame's stall.
+
+The collision statistics struct, counters, clocks and `[UWP_COLLISION]` output
+have been removed, including the earlier `players_collision_state` and
+`player_hit_push` detail records. Collision routines execute their original
+calls and conditions. Hit/damage/first-attack event markers remain, along with
+general game-phase timing, audio diagnostics and the WGI controller fix.
+
+New `[UWP_COMBAT]` timed kinds measure Player_attack and its common handlers:
+
+| Kind | Operation |
+| --- | --- |
+| `attack_total` | entire Player_attack, including setup and priority handling |
+| `attack_power_off` | check_em_tk_power_off |
+| `attack_chain_reset` | clear_chainex_check on initial entry |
+| `attack_feedback` | pp_pulpara_remake_at on subsequent steps |
+| `attack_guard` | jumping_guard_type_check |
+| `attack_routine` | actual plpat_lv_00 routine selected immediately before dispatch |
+| `attack_extra_routine` | character-specific extra-attack dispatch |
+| `attack_landing` | hoken_muriyari_chakuchi in common attack handlers |
+| `attack_direction` | setup_lvdir_after_autodir in common attack handlers |
+| `attack_cancel_timer` | get_cancel_timer in common attack handlers |
+| `attack_animation_init` | set_char_move_init in common attack handlers |
+| `attack_animation` | char_move in common attack handlers |
+
+For these kinds, subject is the zero-based player slot, value is the internal
+character ID, and detail packs routine `[2] << 8` plus `[3]` before the measured
+call. `detail_hex=0x00000401`, for example, means handler 4, step 1. The existing
+full player-routine snapshot is captured earlier and may differ after a state
+transition; prefer attack_routine's snapshot when identifying the actual attack
+handler. Nested durations are inclusive and must not be added together. Timed
+calls below 1 ms remain omitted, with the existing fixed-size combat buffer and
+session budgets. Each original handler call executes once, in the original order.
+
+Confirm `render_trace_version=14`, then repeat two matches with the same attacker,
+defender, stage, attack button and approach movement. Land one isolated opening
+hit in each and return to character select between matches without closing the
+app. Keep the defender identical: the version 13 test changed the defender's
+internal ID between the two matches. Wait five seconds and collect both logs.
+Look for the slow attack_routine/attack_total and its nested detail records before
+the hit marker. The agent ran static checks only, without build or shader
+compilation; console validation remains with the user.
+
+### Version 15: shared attack entry and animation initialization
+
+Version 14 measured 83.51 ms in Hugo's extra routine 16, step 0. Its dispatch
+selects the shared Att_HADOUKEN2 function, not a common handler in plpat.c.
+Version 15 instruments that initial branch without changing its order:
+
+- `extra_entry_landing`: hoken_muriyari_chakuchi.
+- `extra_entry_animation_init`: set_char_move_init. Subject is the player slot,
+  detail is the attack animation index, and value is the internal character ID.
+- `char_init_prepare`: set_char_move_init preparation before its char_move call.
+- `char_init_execute`: the initial char_move execution.
+- `char_init_total`: the whole measured initialization. For these three kinds,
+  subject is the source work ID, detail is the animation index passed on entry,
+  and value is koc (animation-table group). Durations are inclusive.
+
+The existing animation opcode/pattern/effect/sound records remain available
+inside the initial execution, along with impact markers and attack dispatch
+measurements. Calls below 1 ms remain omitted. Fixed combat buffers, rate limits,
+controller fixes, rendering and audio behavior remain unchanged. The preparation
+measurement includes setupCharTableData and the other existing assignments and
+initialization calls; a slow preparation result requires further subdivision.
+
+Repeat the same two-match test with Hugo attacking Yun, preserving stage, attack
+button and approach movement. Wait five seconds before collecting both logs and
+confirm `render_trace_version=15`. No build or shader compilation was run by the
+agent; runtime validation is performed locally by the user.
+
+### Version 16: damage reaction and animation-table preparation
+
+Version 15 measured 96.73 ms in the defender's damage reaction after the first
+hit and 10.53 ms in a separate impact effect's animation preparation. Version 16
+adds inclusive timings `damage_flags`, `damage_reaction_data`, `damage_bullet`,
+`damage_chain`, `damage_handler` and `damage_hitstop` around the existing calls
+in Player_damage. Subject is player slot, value is internal character ID, and
+detail packs routine numbers 2 and 3 before the call. Timings under 1 ms are
+omitted. In set_char_move_init, `char_init_table_lookup` measures the existing
+table lookup and `char_init_table_setup` measures setupCharTableData; subject is
+work ID, detail is animation index and value is table group. The existing
+char_init_prepare and char_init_total encompass these measurements, so do not
+sum nested times. Remaining work in preparation can still contain the delay.
+
+Repeat the two-match Hugo versus Yun test with the same stage and opening hit;
+collect both logs after five seconds and confirm render_trace_version=16. No
+build or shader compilation was run by the agent. Xbox validation remains local.
 
 ## Packaging and signing
 

@@ -1,4 +1,5 @@
 #include "port/debug/debug_log.h"
+#include "port/uwp_diagnostics.h"
 #include "port/paths.h"
 
 #include <SDL3/SDL.h>
@@ -871,6 +872,9 @@ static void write_session_file(const char* started_at, int argc, const char* com
 }
 
 void DebugLog_Init(int enabled, int light_profile_enabled, int argc, const char* command_line) {
+#if defined(SF3_UWP)
+    if (!SF3_UWP_DIAGNOSTIC_DISK_LOGGING) enabled = 0;
+#endif
     if (debug_log_initialized) {
         return;
     }

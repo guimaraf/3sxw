@@ -74,7 +74,19 @@ s32 cseTsbRequest(u16 bank, u16 code, s32 NumArgSets, ...) {
 
     va_end(vlist);
 
+#if defined(SF3_UWP)
+    const Uint64 request_begin_ns = SDL_GetTicksNS();
+#endif
     const s32 result = mlTsbRequest(bank, code, rtpc);
+#if defined(SF3_UWP)
+    static unsigned int request_records;
+    const Uint64 request_ns = SDL_GetTicksNS() - request_begin_ns;
+    if (request_ns >= 1000000 && request_records < 128) {
+        request_records++;
+        SDL_Log("[UWP_AUDIO] tsb_request bank=%u code=%u result=%d elapsed_ms=%.3f",
+                (unsigned int)bank, (unsigned int)code, result, (double)request_ns / 1e6);
+    }
+#endif
 
     if (record_timing) {
         DebugLog_RecordCseTsbRequest((double)(SDL_GetTicksNS() - start_ns) / 1e6);

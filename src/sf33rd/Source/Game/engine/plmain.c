@@ -5,6 +5,10 @@
 
 #include "sf33rd/Source/Game/engine/plmain.h"
 #include "common.h"
+#if defined(SF3_UWP)
+#include "port/sdl/sdl_app.h"
+#endif
+
 #include "constants.h"
 #include "sf33rd/Source/Game/animation/appear.h"
 #include "sf33rd/Source/Game/com/com_pl.h"
@@ -40,6 +44,16 @@ s16 select_hit_stop(s16 ms, s16 sb);
 
 void Player_move(PLW* wk, u16 lv_data) { // 🟡
     s16 i;
+#if defined(SF3_UWP)
+    const Uint64 player_start_ns = SDL_GetTicksNS();
+    const int routine = ((Uint32)wk->wu.routine_no[0] << 24) | ((Uint32)wk->wu.routine_no[1] << 16) |
+                        ((Uint32)wk->wu.routine_no[2] << 8) | wk->wu.routine_no[3];
+    const int character = wk->player_number;
+    const int player_id = wk->wu.id;
+    const int vital_before = wk->wu.vital_new;
+    const int combo_before = wk->combo_type.total;
+    Uint64 phase_start_ns;
+#endif
 
 #if CPS3
     if (DAT_02016b6c == -1) {
@@ -98,18 +112,39 @@ void Player_move(PLW* wk, u16 lv_data) { // 🟡
     wk->wu.renew_attack = 0;
     wk->wu.vital_old = wk->wu.vital_new;
 
+#if defined(SF3_UWP)
+    phase_start_ns = SDL_GetTicksNS();
+#endif
     if (wk->sa_stop_flag != 1) {
         waza_check(wk);
     } else {
         key_thru(wk);
     }
 
+#if defined(SF3_UWP)
+    SDLApp_RecordUWPCombatDetail("player_commands", player_id, routine, character, SDL_GetTicksNS() - phase_start_ns);
+#endif
     wk->wu.cmwk[10] = wk->cp->lgp;
     wk->wu.cmwk[11] += wk->cp->lgp;
     wk->wu.cmwk[11] &= 0x7FFF;
     wk->wu.cmwk[12] = wk->cp->sw_new;
     wk->wu.cmwk[13] = wk->cp->sw_now;
+#if defined(SF3_UWP)
+    phase_start_ns = SDL_GetTicksNS();
+    const int routine_at_call = ((Uint32)wk->wu.routine_no[0] << 24) | ((Uint32)wk->wu.routine_no[1] << 16) |
+                                ((Uint32)wk->wu.routine_no[2] << 8) | wk->wu.routine_no[3];
+#endif
     plmain_lv_00[wk->wu.routine_no[0]](wk);
+#if defined(SF3_UWP)
+    SDLApp_RecordUWPCombatDetail("player_routine", player_id, routine_at_call, character, SDL_GetTicksNS() - phase_start_ns);
+    SDLApp_RecordUWPCombatDetail("player_total", player_id, routine, character, SDL_GetTicksNS() - player_start_ns);
+    if (vital_before != wk->wu.vital_new) {
+        SDLApp_RecordUWPCombatDetail("vital_change", player_id, vital_before, wk->wu.vital_new, 0);
+    }
+    if (combo_before != wk->combo_type.total) {
+        SDLApp_RecordUWPCombatDetail("combo_change", player_id, combo_before, wk->combo_type.total, 0);
+    }
+#endif
 }
 
 #if !CPS3
@@ -325,7 +360,14 @@ void player_mv_4000(PLW* wk) { // 🟡
     }
 
     if (!check_hit_stop(wk)) {
+#if defined(SF3_UWP)
+        const int active_state_detail = wk->wu.routine_no[1];
+        const Uint64 active_state_start_ns = SDL_GetTicksNS();
+#endif
         plmain_lv_02[wk->wu.routine_no[1]](wk);
+#if defined(SF3_UWP)
+        SDLApp_RecordUWPCombatDetail("active_state", wk->wu.id, active_state_detail, wk->player_number, SDL_GetTicksNS() - active_state_start_ns);
+#endif
 
         if (Timer_Freeze == 0 && wk->wu.hit_stop == 0 && wk->zuru_timer > 0) {
             wk->zuru_timer -= 2;
@@ -346,7 +388,14 @@ void player_mv_4000(PLW* wk) { // 🟡
         look_after_timers(wk);
     }
 
+#if defined(SF3_UWP)
+    const int active_gauges_detail = wk->wu.routine_no[1];
+    const Uint64 active_gauges_start_ns = SDL_GetTicksNS();
+#endif
     about_gauge_process(wk);
+#if defined(SF3_UWP)
+    SDLApp_RecordUWPCombatDetail("active_gauges", wk->wu.id, active_gauges_detail, wk->player_number, SDL_GetTicksNS() - active_gauges_start_ns);
+#endif
 }
 
 s16 check_hit_stop(PLW* wk) { // 🟢

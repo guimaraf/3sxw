@@ -5,6 +5,9 @@
 
 #include "sf33rd/Source/Game/engine/charset.h"
 #include "common.h"
+#if defined(SF3_UWP)
+#include "port/sdl/sdl_app.h"
+#endif
 #include "sf33rd/Source/Game/effect/effect.h"
 #include "sf33rd/Source/Game/effect/effxx.h"
 #include "sf33rd/Source/Game/engine/cmd_data.h"
@@ -44,6 +47,9 @@ void check_cgd_patdat2(WORK* wk);
 void setup_metamor_kezuri(WORK* wk);
 
 void set_char_move_init(WORK* wk, s16 koc, s16 index) {
+#if defined(SF3_UWP)
+    const Uint64 init_begin_ns = SDL_GetTicksNS();
+#endif
     wk->now_koc = koc;
     wk->char_index = index;
 
@@ -60,8 +66,18 @@ void set_char_move_init(WORK* wk, s16 koc, s16 index) {
     dst[-1] = src[-1];
     dst[-2] = src[-2];
 #else
+#if defined(SF3_UWP)
+    const Uint64 table_start_ns = SDL_GetTicksNS();
+#endif
     wk->set_char_ad = &wk->char_table[koc][wk->char_table[koc][index] / sizeof(u32)];
+#if defined(SF3_UWP)
+    SDLApp_RecordUWPCombatDetail("char_init_table_lookup", wk->id, index, koc, SDL_GetTicksNS() - table_start_ns);
+    const Uint64 table_copy_start_ns = SDL_GetTicksNS();
+#endif
     setupCharTableData(wk, 1, 1);
+#if defined(SF3_UWP)
+    SDLApp_RecordUWPCombatDetail("char_init_table_setup", wk->id, index, koc, SDL_GetTicksNS() - table_copy_start_ns);
+#endif
 #endif
 
     wk->cg_ix = -wk->cgd_type;
@@ -95,7 +111,16 @@ void set_char_move_init(WORK* wk, s16 koc, s16 index) {
     }
 
     wk->K5_init_flag = 1; // TODO: Confirm CPS3 match
+#if defined(SF3_UWP)
+    const Uint64 init_execute_ns = SDL_GetTicksNS();
+    SDLApp_RecordUWPCombatDetail("char_init_prepare", wk->id, index, koc, init_execute_ns - init_begin_ns);
+    const Uint64 char_first_ns = SDL_GetTicksNS();
+#endif
     char_move(wk);
+#if defined(SF3_UWP)
+    SDLApp_RecordUWPCombatDetail("char_init_execute", wk->id, index, koc, SDL_GetTicksNS() - char_first_ns);
+    SDLApp_RecordUWPCombatDetail("char_init_total", wk->id, index, koc, SDL_GetTicksNS() - init_begin_ns);
+#endif
 }
 
 void setupCharTableData(WORK* wk, s32 clr, s32 info) {
@@ -374,7 +399,15 @@ s32 char_move_cmms3(PLW* wk) {
             break;
         }
 
+#if defined(SF3_UWP)
+        const int opcode = cpc->code;
+        const Uint64 opcode_start_ns = SDL_GetTicksNS();
+        const s32 opcode_result = decode_chcmd[cpc->code](wk, cpc);
+        SDLApp_RecordUWPCombatDetail("animation_opcode_alt", wk->wu.id, opcode, wk->wu.work_id, SDL_GetTicksNS() - opcode_start_ns);
+        if (opcode_result != 0) {
+#else
         if (decode_chcmd[cpc->code](wk, cpc) != 0) {
+#endif
             wk->wu.cg_ix += wk->wu.cgd_type;
         } else if (wk->meoshi_jump_flag != 0) {
             break;
@@ -429,11 +462,26 @@ void check_cm_extended_code(WORK* wk) {
         cpc = (UNK11*)(wk->set_char_ad + wk->cg_ix);
 
         if (cpc->code >= 0x100) {
+#if defined(SF3_UWP)
+            const int animation_pattern_detail = wk->cg_ix;
+            const Uint64 animation_pattern_start_ns = SDL_GetTicksNS();
+#endif
             check_cgd_patdat(wk);
+#if defined(SF3_UWP)
+            SDLApp_RecordUWPCombatDetail("animation_pattern", wk->id, animation_pattern_detail, wk->work_id, SDL_GetTicksNS() - animation_pattern_start_ns);
+#endif
             break;
         }
 
+#if defined(SF3_UWP)
+        const int opcode = cpc->code;
+        const Uint64 opcode_start_ns = SDL_GetTicksNS();
+        const s32 opcode_result = decode_chcmd[cpc->code](wk, cpc);
+        SDLApp_RecordUWPCombatDetail("animation_opcode", wk->id, opcode, wk->work_id, SDL_GetTicksNS() - opcode_start_ns);
+        if (opcode_result == 0) {
+#else
         if (decode_chcmd[cpc->code](wk, cpc) == 0) {
+#endif
             break;
         }
 
@@ -2145,7 +2193,14 @@ s32 comm_sse(WORK* wk, UNK11* ctc) {
     }
 
     if (wk->cg_se) {
+#if defined(SF3_UWP)
+        const int animation_sound_detail = wk->cg_se;
+        const Uint64 animation_sound_start_ns = SDL_GetTicksNS();
+#endif
         sound_effect_request[wk->cg_se](wk, check_xcopy_filter_se_req(wk));
+#if defined(SF3_UWP)
+        SDLApp_RecordUWPCombatDetail("animation_sound", wk->id, animation_sound_detail, wk->work_id, SDL_GetTicksNS() - animation_sound_start_ns);
+#endif
     }
 
     return 1;
@@ -2430,7 +2485,14 @@ void check_cgd_patdat(WORK* wk) {
         }
 
         if (wk->cg_effect) {
+#if defined(SF3_UWP)
+            const int animation_effect_init_detail = wk->cg_effect;
+            const Uint64 animation_effect_init_start_ns = SDL_GetTicksNS();
+#endif
             effinitjptbl[wk->cg_effect](wk, wk->cg_eftype);
+#if defined(SF3_UWP)
+            SDLApp_RecordUWPCombatDetail("animation_effect_init", wk->id, animation_effect_init_detail, wk->work_id, SDL_GetTicksNS() - animation_effect_init_start_ns);
+#endif
         }
 
         break;
@@ -2448,7 +2510,14 @@ void check_cgd_patdat(WORK* wk) {
     }
 
     if (wk->cg_se) {
+#if defined(SF3_UWP)
+        const int pattern_sound_id = wk->cg_se;
+        const Uint64 pattern_sound_start_ns = SDL_GetTicksNS();
+#endif
         sound_effect_request[wk->cg_se](wk, check_xcopy_filter_se_req(wk));
+#if defined(SF3_UWP)
+        SDLApp_RecordUWPCombatDetail("animation_sound", wk->id, pattern_sound_id, wk->work_id, SDL_GetTicksNS() - pattern_sound_start_ns);
+#endif
     }
 
     if (wk->work_id == 1) {

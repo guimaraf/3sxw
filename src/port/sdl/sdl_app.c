@@ -1,4 +1,16 @@
+#if defined(SF3_UWP)
+/* Include the SDK before common.h defines the function-like BOOL macro. */
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 #include "port/sdl/sdl_app.h"
+#include "port/uwp_diagnostics.h"
 #include "common.h"
 #include "port/config/config.h"
 #include "port/config/keymap.h"
@@ -93,7 +105,7 @@ static struct {
 static unsigned int uwp_game_phase_count;
 
 void SDLApp_RecordUWPGamePhase(const char* name, Uint64 elapsed_ns) {
-    if (uwp_trace_thread == NULL) {
+    if (SF3_UWP_DIAGNOSTIC_DISK_LOGGING && uwp_trace_thread == NULL) {
         return;
     }
     unsigned int i;
@@ -115,115 +127,95 @@ void SDLApp_RecordUWPGamePhase(const char* name, Uint64 elapsed_ns) {
     uwp_game_phases[i].calls++;
 }
 
-typedef struct UWPInputTrace {
-    Uint64 sequence, event_ns, poll_ns, sample_ns, copy_ns;
-    SDL_JoystickID device;
-    int button, slot;
-    bool down, observed, eligible;
-    Uint32 p1, p2;
-} UWPInputTrace;
-static UWPInputTrace uwp_inputs[128];
-static unsigned int uwp_input_count, uwp_input_overflow;
-static Uint64 uwp_input_sequence;
+/* Main-thread-only combat samples; flushed after EndFrame assigns the frame ID.
+ * Call durations are inclusive and may contain waits. No hot-path allocation. */
+static struct {
+    const char* kind;
+    int subject, detail, value;
+    Uint64 at_ns, elapsed_ns;
+} uwp_combat_details[64];
+static unsigned int uwp_combat_count, uwp_combat_dropped;
+static unsigned int uwp_combat_events, uwp_combat_timings;
 
-void SDLApp_TraceUWPInputEvent(const SDL_Event* event) {
-    if (uwp_trace_thread == NULL || (event->type != SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
-        event->type != SDL_EVENT_GAMEPAD_BUTTON_UP)) {
+/* Only the main game thread uses this trace. No game state is changed. */
+static struct {
+    bool active, cpu_valid;
+    int character, subject;
+    Uint64 start_ns, cpu_100ns, marks[UWP_ATTACK_MARKS];
+} uwp_attack_trace;
+
+static bool uwp_thread_cpu_time(Uint64* result) {
+    FILETIME created, exited, kernel, user;
+    if (!GetThreadTimes(GetCurrentThread(), &created, &exited, &kernel, &user)) {
+        return false;
+    }
+    *result = (((Uint64)kernel.dwHighDateTime << 32) | kernel.dwLowDateTime) +
+              (((Uint64)user.dwHighDateTime << 32) | user.dwLowDateTime);
+    return true;
+}
+
+void SDLApp_UWPAttackTraceBegin(int character, int subject) {
+    SDL_zero(uwp_attack_trace);
+    uwp_attack_trace.active = true;
+    uwp_attack_trace.character = character;
+    uwp_attack_trace.subject = subject;
+    uwp_attack_trace.cpu_valid = uwp_thread_cpu_time(&uwp_attack_trace.cpu_100ns);
+    uwp_attack_trace.start_ns = SDL_GetTicksNS();
+}
+
+void SDLApp_UWPAttackTraceMark(int mark) {
+    if (uwp_attack_trace.active && mark >= 0 && mark < UWP_ATTACK_MARKS &&
+        uwp_attack_trace.marks[mark] == 0) {
+        uwp_attack_trace.marks[mark] = SDL_GetTicksNS();
+    }
+}
+
+static double uwp_attack_mark_ms(int mark) {
+    return uwp_attack_trace.marks[mark] ?
+        (double)(uwp_attack_trace.marks[mark] - uwp_attack_trace.start_ns) / 1e6 : -1.0;
+}
+
+void SDLApp_UWPAttackTraceEnd(void) {
+    if (!uwp_attack_trace.active) return;
+    const Uint64 end_ns = SDL_GetTicksNS();
+    Uint64 cpu_end = 0;
+    const bool cpu_valid = uwp_attack_trace.cpu_valid && uwp_thread_cpu_time(&cpu_end) &&
+                           cpu_end >= uwp_attack_trace.cpu_100ns;
+    if (end_ns - uwp_attack_trace.start_ns >= 1000000) {
+        SDL_Log("[UWP_COMBAT] kind=attack_entry_trace character=%d subject=%d elapsed_ms=%.3f "
+                "cpu_valid=%d cpu_ms=%.3f wrapper_ms=%.3f selected_ms=%.3f shared_ms=%.3f "
+                "landing_done_ms=%.3f animation_done_ms=%.3f",
+                uwp_attack_trace.character, uwp_attack_trace.subject,
+                (double)(end_ns - uwp_attack_trace.start_ns) / 1e6, (int)cpu_valid,
+                cpu_valid ? (double)(cpu_end - uwp_attack_trace.cpu_100ns) / 10000.0 : -1.0,
+                uwp_attack_mark_ms(UWP_ATTACK_WRAPPER), uwp_attack_mark_ms(UWP_ATTACK_SELECTED),
+                uwp_attack_mark_ms(UWP_ATTACK_SHARED), uwp_attack_mark_ms(UWP_ATTACK_LANDING),
+                uwp_attack_mark_ms(UWP_ATTACK_ANIMATION));
+    }
+    uwp_attack_trace.active = false;
+}
+
+void SDLApp_RecordUWPCombatDetail(const char* kind, int subject, int detail, int value, Uint64 elapsed_ns) {
+    if ((SF3_UWP_DIAGNOSTIC_DISK_LOGGING && uwp_trace_thread == NULL) || G_No[0] != 2 || G_No[1] != 2 ||
+        (elapsed_ns != 0 && elapsed_ns < 1000000)) {
         return;
     }
-    if (uwp_input_count == SDL_arraysize(uwp_inputs)) {
-        uwp_input_overflow++;
+    if (uwp_combat_count == SDL_arraysize(uwp_combat_details) ||
+        (elapsed_ns == 0 ? uwp_combat_events >= 512 : uwp_combat_timings >= 1024)) {
+        uwp_combat_dropped++;
         return;
     }
-    UWPInputTrace* trace = &uwp_inputs[uwp_input_count++];
-    SDL_zero(*trace);
-    trace->sequence = ++uwp_input_sequence;
-    trace->event_ns = event->gbutton.timestamp;
-    trace->poll_ns = SDL_GetTicksNS();
-    trace->device = event->gbutton.which;
-    trace->button = event->gbutton.button;
-    trace->down = event->gbutton.down;
-    trace->slot = -1;
-}
-
-void SDLApp_TraceUWPInputSample(SDL_Gamepad* pad, int slot, bool eligible) {
-    if (uwp_input_count == 0 || pad == NULL) {
-        return;
-    }
-    const SDL_JoystickID device = SDL_GetGamepadID(pad);
-    const Uint64 now = SDL_GetTicksNS();
-    for (unsigned int i = 0; i < uwp_input_count; i++) {
-        UWPInputTrace* trace = &uwp_inputs[i];
-        if (trace->device == device && trace->sample_ns == 0) {
-            trace->sample_ns = now;
-            trace->slot = slot;
-            trace->eligible = eligible;
-            trace->observed = SDL_GetGamepadButton(pad, (SDL_GamepadButton)trace->button) == trace->down;
-        }
-    }
-}
-
-void SDLApp_TraceUWPInputCopy(Uint32 p1, Uint32 p2) {
-    const Uint64 now = uwp_input_count ? SDL_GetTicksNS() : 0;
-    for (unsigned int i = 0; i < uwp_input_count; i++) {
-        UWPInputTrace* trace = &uwp_inputs[i];
-        if (trace->sample_ns != 0 && trace->copy_ns == 0) {
-            trace->copy_ns = now;
-            trace->p1 = p1;
-            trace->p2 = p2;
-        }
-    }
-}
-
-static double uwp_input_elapsed(Uint64 start, Uint64 end) {
-    return start != 0 && end >= start ? (double)(end - start) / 1e6 : -1.0;
-}
-
-static void finish_uwp_input_trace(Uint64 present_begin, Uint64 present_end, bool present_ok) {
-    static unsigned int events, unobserved, invalid_timestamps, details, slow_details, omitted;
-    static double max_poll_ms, max_copy_ms, max_present_ms;
-    for (unsigned int i = 0; i < uwp_input_count; i++) {
-        const UWPInputTrace* trace = &uwp_inputs[i];
-        const bool valid_time = trace->event_ns != 0 && trace->event_ns <= trace->poll_ns;
-        const double poll_ms = valid_time ? uwp_input_elapsed(trace->event_ns, trace->poll_ns) : -1.0;
-        const double copy_ms = valid_time ? uwp_input_elapsed(trace->event_ns, trace->copy_ns) : -1.0;
-        const double present_ms = valid_time ? uwp_input_elapsed(trace->event_ns, present_end) : -1.0;
-        events++;
-        unobserved += !trace->observed || !trace->eligible || trace->copy_ns == 0;
-        invalid_timestamps += !valid_time;
-        max_poll_ms = SDL_max(max_poll_ms, poll_ms);
-        max_copy_ms = SDL_max(max_copy_ms, copy_ms);
-        max_present_ms = SDL_max(max_present_ms, present_ms);
-        const bool emit = present_ms > 40.0 ? slow_details++ < 16 : details++ < 8;
-        if (emit) {
-            SDL_Log("[UWP_PERF] input seq=%llu frame=%llu device=%u slot=%d button=%d down=%d "
-                    "timestamp_valid=%d raw_state_matches=%d eligible=%d copy_seen=%d "
-                    "event_ns=%llu poll_ns=%llu sample_ns=%llu copy_ns=%llu "
-                    "event_to_poll_ms=%.3f event_to_copy_ms=%.3f event_to_present_return_ms=%.3f "
-                    "poll_to_sample_ms=%.3f copy_to_present_begin_ms=%.3f present_call_ms=%.3f "
-                    "present_ok=%d p1_mask=0x%08X p2_mask=0x%08X",
-                    (unsigned long long)trace->sequence, (unsigned long long)uwp_render_trace_frame,
-                    (unsigned int)trace->device, trace->slot, trace->button, trace->down,
-                    valid_time, trace->observed, trace->eligible, trace->copy_ns != 0,
-                    (unsigned long long)trace->event_ns, (unsigned long long)trace->poll_ns,
-                    (unsigned long long)trace->sample_ns, (unsigned long long)trace->copy_ns,
-                    poll_ms, copy_ms, present_ms, uwp_input_elapsed(trace->poll_ns, trace->sample_ns),
-                    uwp_input_elapsed(trace->copy_ns, present_begin),
-                    uwp_input_elapsed(present_begin, present_end), present_ok,
-                    (unsigned int)trace->p1, (unsigned int)trace->p2);
-        } else {
-            omitted++;
-        }
-    }
-    uwp_input_count = 0;
-    if (uwp_render_trace_frame % 120 == 0) {
-        SDL_Log("[UWP_PERF] input_window frame=%llu events=%u uncorrelated=%u invalid_timestamps=%u "
-                "trace_overflow=%u details_omitted=%u max_event_to_poll_ms=%.3f "
-                "max_event_to_copy_ms=%.3f max_event_to_present_return_ms=%.3f",
-                (unsigned long long)uwp_render_trace_frame, events, unobserved, invalid_timestamps,
-                uwp_input_overflow, omitted, max_poll_ms, max_copy_ms, max_present_ms);
-        events = unobserved = invalid_timestamps = details = slow_details = omitted = uwp_input_overflow = 0;
-        max_poll_ms = max_copy_ms = max_present_ms = 0.0;
+    const unsigned int i = uwp_combat_count++;
+    uwp_combat_details[i].kind = kind;
+    uwp_combat_details[i].subject = subject;
+    uwp_combat_details[i].detail = detail;
+    uwp_combat_details[i].value = value;
+    uwp_combat_details[i].at_ns = SDL_GetTicksNS();
+    uwp_combat_details[i].elapsed_ns = elapsed_ns;
+    if (elapsed_ns == 0) {
+        uwp_combat_events++;
+    } else {
+        uwp_combat_timings++;
     }
 }
 
@@ -236,7 +228,7 @@ static int uwp_render_trace_worker(void* userdata) {
     char header[512];
     SDL_snprintf(header, sizeof(header),
         "ticks_ms=%llu [UWP_RENDER] session build=%s %s SDL_headers=%d SDL_runtime=%d "
-        "render_trace_version=9 limit_bytes=4194304 async_log=1 verbose=%d "
+        "render_trace_version=18 limit_bytes=4194304 async_log=1 verbose=%d "
         "logical_cpus=%d main_thread=%llu log_worker=%llu\n",
         (unsigned long long)SDL_GetTicks(), __DATE__, __TIME__, SDL_VERSION, SDL_GetVersion(),
         uwp_trace_verbose, SDL_GetNumLogicalCPUCores(), (unsigned long long)uwp_trace_main_thread,
@@ -316,6 +308,9 @@ static void SDLCALL write_uwp_render_trace(void* userdata, int category,
     (void)userdata;
     if (message != NULL && (SDL_strstr(message, "[UWP_RENDER]") != NULL ||
         SDL_strstr(message, "[UWP_PERF]") != NULL ||
+        SDL_strstr(message, "[UWP_COMBAT]") != NULL ||
+        SDL_strstr(message, "[UWP_PAD]") != NULL ||
+        SDL_strstr(message, "[UWP_AUDIO]") != NULL ||
         ((category == SDL_LOG_CATEGORY_RENDER || category == SDL_LOG_CATEGORY_VIDEO) &&
          priority >= SDL_LOG_PRIORITY_WARN))) {
         char line[4096];
@@ -343,7 +338,21 @@ static void SDLCALL write_uwp_render_trace(void* userdata, int category,
     }
 }
 
+static void SDLCALL discard_uwp_diagnostic_output(void* userdata, int category,
+                                                 SDL_LogPriority priority, const char* message) {
+    (void)userdata;
+    if (message != NULL && SDL_strstr(message, "[UWP_") != NULL) return;
+    if (uwp_trace_previous_output != NULL) {
+        uwp_trace_previous_output(uwp_trace_previous_userdata, category, priority, message);
+    }
+}
+
 static void init_uwp_render_trace(void) {
+    if (!SF3_UWP_DIAGNOSTIC_DISK_LOGGING) {
+        SDL_GetLogOutputFunction(&uwp_trace_previous_output, &uwp_trace_previous_userdata);
+        SDL_SetLogOutputFunction(discard_uwp_diagnostic_output, NULL);
+        return;
+    }
     const char* directory = Paths_GetDataPath();
     char* path = NULL;
     if (directory == NULL || SDL_asprintf(&path, "%suwp_render_check.log", directory) < 0) {
@@ -621,7 +630,24 @@ void SDLApp_RecordUWPGameTiming(const DebugFrameTiming* frame, const DebugStepSt
     static unsigned int frames, slow_frames;
     static double peak_task_ms;
     if (uwp_trace_thread == NULL) {
+        /* Keep per-frame sampling bounded while no output worker is running. */
+        uwp_combat_count = uwp_combat_dropped = 0;
+        uwp_combat_events = uwp_combat_timings = 0;
         return;
+    }
+    for (unsigned int i = 0; i < uwp_combat_count; i++) {
+        SDL_Log("[UWP_COMBAT] frame=%llu kind=%s subject=%d detail=%d detail_hex=0x%08X value=%d at_ns=%llu elapsed_ms=%.3f event=%d",
+                (unsigned long long)uwp_render_trace_frame, uwp_combat_details[i].kind,
+                uwp_combat_details[i].subject, uwp_combat_details[i].detail,
+                (unsigned int)uwp_combat_details[i].detail, uwp_combat_details[i].value,
+                (unsigned long long)uwp_combat_details[i].at_ns,
+                (double)uwp_combat_details[i].elapsed_ns / 1e6, uwp_combat_details[i].elapsed_ns == 0);
+    }
+    uwp_combat_count = 0;
+    if (uwp_render_trace_frame % 120 == 0 && uwp_combat_dropped != 0) {
+        SDL_Log("[UWP_COMBAT] limits frame=%llu omitted=%u event_limit=512 timing_limit=1024 frame_capacity=64",
+                (unsigned long long)uwp_render_trace_frame, uwp_combat_dropped);
+        uwp_combat_dropped = 0;
     }
     frames++;
 #define UWP_FRAME_MAX(field) window_frame.field = SDL_max(window_frame.field, frame->field)
@@ -978,8 +1004,11 @@ bool SDLApp_FullInit() {
     init_aspect_ratio();
     init_frame_timing();
 #if defined(SF3_UWP)
-    // Xbox uses SDL's Windows.Gaming.Input backend.
-    SDL_SetHint(SDL_HINT_JOYSTICK_WGI, "1");
+    // Use one provider so a physical Xbox controller cannot occupy both slots
+    // through separate XInput and WGI instance IDs.
+    const bool wgi_selected = SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_WGI, "1", SDL_HINT_OVERRIDE);
+    const bool xinput_disabled = SDL_SetHintWithPriority(SDL_HINT_XINPUT_ENABLED, "0", SDL_HINT_OVERRIDE);
+    SDL_Log("[UWP_PAD] providers wgi_selected=%d xinput_disabled=%d", wgi_selected, xinput_disabled);
 #endif
     if (!SDL_Init(SDL_INIT_GAMEPAD)) {
         SDL_Log("Couldn't initialize the SDL gamepad subsystem; keyboard input remains available: %s", SDL_GetError());
@@ -1191,9 +1220,6 @@ bool SDLApp_PollEvents() {
     bool continue_running = true;
 
     while (SDL_PollEvent(&event)) {
-#if defined(SF3_UWP)
-        SDLApp_TraceUWPInputEvent(&event);
-#endif
         switch (event.type) {
         case SDL_EVENT_GAMEPAD_ADDED:
         case SDL_EVENT_GAMEPAD_REMOVED:
@@ -1271,6 +1297,7 @@ const char* SDLApp_GetFrameTimingName() {
 void SDLApp_BeginFrame() {
 #if defined(SF3_UWP)
     uwp_game_phase_count = 0;
+    uwp_combat_count = 0;
     if (uwp_trace_thread != NULL) {
         uwp_frame_start_ns = SDL_GetTicksNS();
         uwp_frame_interval_ms = uwp_previous_frame_start_ns != 0
@@ -1548,18 +1575,10 @@ void SDLApp_EndFrame(SDLAppFrameTiming* timing) {
 #endif
 
     const Uint64 present_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;
-    const bool present_ok = UWP_RENDER_CALL(SDL_RenderPresent(renderer));
-#if defined(SF3_UWP)
-    const Uint64 input_present_end_ns = SDL_GetTicksNS();
-#else
-    (void)present_ok;
-#endif
+    UWP_RENDER_CALL(SDL_RenderPresent(renderer));
     if (timing != NULL) {
         timing->present_ms = (double)(SDL_GetTicksNS() - present_start_ns) / 1e6;
     }
-#if defined(SF3_UWP)
-    finish_uwp_input_trace(present_start_ns, input_present_end_ns, present_ok);
-#endif
 
     // Cleanup
     const Uint64 cleanup_start_ns = timing != NULL ? SDL_GetTicksNS() : 0;

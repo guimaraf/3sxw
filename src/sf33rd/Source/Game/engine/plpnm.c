@@ -4,6 +4,9 @@
  */
 
 #include "common.h"
+#if defined(SF3_UWP)
+#include "port/sdl/sdl_app.h"
+#endif
 #include "sf33rd/Source/Game/animation/appear.h"
 #include "sf33rd/Source/Game/animation/lose_pl.h"
 #include "sf33rd/Source/Game/animation/win_pl.h"
@@ -83,7 +86,14 @@ void Player_normal(PLW* wk) {
 
     check_my_tk_power_off(wk, (PLW*)wk->wu.target_adrs);
     check_em_tk_power_off(wk, (PLW*)wk->wu.target_adrs);
+#if defined(SF3_UWP)
+    const int normal_state_detail = (wk->wu.routine_no[2] << 8) | wk->wu.routine_no[3];
+    const Uint64 normal_state_start_ns = SDL_GetTicksNS();
+#endif
     plpnm_lv_00[wk->wu.routine_no[2]](wk);
+#if defined(SF3_UWP)
+    SDLApp_RecordUWPCombatDetail("normal_state", wk->wu.id, normal_state_detail, wk->player_number, SDL_GetTicksNS() - normal_state_start_ns);
+#endif
 
     if (wk->wu.cg_prio) {
         wk->wu.next_z = ((WORK*)wk->wu.target_adrs)->my_priority;
@@ -206,10 +216,37 @@ void Normal_04000(PLW* wk) {
         break;
 
     case 1:
+#if defined(SF3_UWP)
+    {
+#endif
+#if defined(SF3_UWP)
+        const int normal04_speed_detail = wk->wu.char_index;
+        const Uint64 normal04_speed_start_ns = SDL_GetTicksNS();
+#endif
         cal_mvxy_speed(&wk->wu);
+#if defined(SF3_UWP)
+        SDLApp_RecordUWPCombatDetail("normal04_speed", wk->wu.id, normal04_speed_detail, wk->player_number, SDL_GetTicksNS() - normal04_speed_start_ns);
+#endif
+#if defined(SF3_UWP)
+        const int normal04_position_detail = wk->wu.char_index;
+        const Uint64 normal04_position_start_ns = SDL_GetTicksNS();
+#endif
         add_mvxy_speed(&wk->wu);
+#if defined(SF3_UWP)
+        SDLApp_RecordUWPCombatDetail("normal04_position", wk->wu.id, normal04_position_detail, wk->player_number, SDL_GetTicksNS() - normal04_position_start_ns);
+#endif
+#if defined(SF3_UWP)
+        const int normal04_animation_detail = wk->wu.char_index;
+        const Uint64 normal04_animation_start_ns = SDL_GetTicksNS();
+#endif
         char_move(&wk->wu);
+#if defined(SF3_UWP)
+        SDLApp_RecordUWPCombatDetail("normal04_animation", wk->wu.id, normal04_animation_detail, wk->player_number, SDL_GetTicksNS() - normal04_animation_start_ns);
+#endif
         break;
+#if defined(SF3_UWP)
+    }
+#endif
     }
 }
 

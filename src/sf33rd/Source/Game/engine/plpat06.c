@@ -5,6 +5,9 @@
 
 #include "sf33rd/Source/Game/engine/plpat06.h"
 #include "common.h"
+#if defined(SF3_UWP)
+#include "port/sdl/sdl_app.h"
+#endif
 #include "sf33rd/Source/Game/engine/charset.h"
 #include "sf33rd/Source/Game/engine/grade.h"
 #include "sf33rd/Source/Game/engine/plpat.h"
@@ -15,7 +18,14 @@
 void (*const pl06_exatt_table[18])(PLW*);
 
 void pl06_extra_attack(PLW* wk) {
+#if defined(SF3_UWP)
+    SDLApp_UWPAttackTraceMark(UWP_ATTACK_WRAPPER);
+    void (*attack)(PLW*) = pl06_exatt_table[wk->wu.routine_no[2] - 16];
+    SDLApp_UWPAttackTraceMark(UWP_ATTACK_SELECTED);
+    attack(wk);
+#else
     pl06_exatt_table[wk->wu.routine_no[2] - 16](wk);
+#endif
 }
 
 void Att_PL06_HASHIRI_NAGE(PLW* wk) {

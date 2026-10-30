@@ -2290,6 +2290,17 @@ u32 _ef01_char_table[] = {
     0x2E0000,   0x400,      0x2F0000,   0x1,        0x0,        0x0
 };
 
+#if defined(SF3_UWP)
+u32 uwp_warm_hit_effect_table(void) {
+    const volatile u32* table = _ef01_char_table;
+    u32 checksum = 0;
+    for (unsigned int i = 0; i < sizeof(_ef01_char_table) / sizeof(_ef01_char_table[0]); ++i) {
+        checksum ^= table[i];
+    }
+    return checksum;
+}
+#endif
+
 u32 _plef_char_table[] = {
     0x2C8,      0x300,      0x370,      0x3C0,      0x400,      0x438,      0x488,      0x4D8,      0x528,
     0x570,      0x5B8,      0x608,      0x658,      0x6A8,      0x720,      0x798,      0x810,      0x888,

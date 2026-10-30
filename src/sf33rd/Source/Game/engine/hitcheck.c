@@ -7,6 +7,10 @@
 #include "bin2obj/exchange.h"
 #include "bin2obj/gauge.h"
 #include "common.h"
+#if defined(SF3_UWP)
+#include "port/sdl/sdl_app.h"
+#endif
+
 #include "sf33rd/Source/Game/effect/eff02.h"
 #include "sf33rd/Source/Game/effect/effect.h"
 #include "sf33rd/Source/Game/engine/charset.h"
@@ -1367,6 +1371,9 @@ void add_combo_work(PLW* as, PLW* ds) {
         return;
     }
 
+#if defined(SF3_UWP)
+    SDLApp_RecordUWPCombatDetail("hit_combo", as->wu.id, ds->wu.id, as->wu.kind_of_waza, 0);
+#endif
     ds->kizetsu_kow = ds->combo_type.new_dm = as->wu.kind_of_waza;
     kow = &ds->combo_type.kind_of[0][0][0];
     cal = &calc_hit[ds->wu.id][0];

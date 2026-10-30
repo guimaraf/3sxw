@@ -5,6 +5,9 @@
 
 #include "sf33rd/Source/Game/engine/plpatuni.h"
 #include "common.h"
+#if defined(SF3_UWP)
+#include "port/sdl/sdl_app.h"
+#endif
 #include "sf33rd/Source/Game/engine/caldir.h"
 #include "sf33rd/Source/Game/engine/charset.h"
 #include "sf33rd/Source/Game/engine/plpat.h"
@@ -121,13 +124,36 @@ void Att_HADOUKEN(PLW* wk) {
 }
 
 void Att_HADOUKEN2(PLW* wk) {
+#if defined(SF3_UWP)
+    SDLApp_UWPAttackTraceMark(UWP_ATTACK_SHARED);
+#endif
     switch (wk->wu.routine_no[3]) {
     case 0:
+#if defined(SF3_UWP)
+    {
+#endif
         wk->wu.routine_no[3]++;
         wk->wu.rl_flag = wk->wu.rl_waza;
+#if defined(SF3_UWP)
+        const Uint64 extra_entry_landing_ns = SDL_GetTicksNS();
+#endif
         hoken_muriyari_chakuchi(wk);
+#if defined(SF3_UWP)
+        SDLApp_UWPAttackTraceMark(UWP_ATTACK_LANDING);
+        SDLApp_RecordUWPCombatDetail("extra_entry_landing", wk->wu.id, wk->as->char_ix, wk->player_number, SDL_GetTicksNS() - extra_entry_landing_ns);
+#endif
+#if defined(SF3_UWP)
+        const Uint64 extra_entry_animation_init_ns = SDL_GetTicksNS();
+#endif
         set_char_move_init(&wk->wu, 5, wk->as->char_ix);
+#if defined(SF3_UWP)
+        SDLApp_UWPAttackTraceMark(UWP_ATTACK_ANIMATION);
+        SDLApp_RecordUWPCombatDetail("extra_entry_animation_init", wk->wu.id, wk->as->char_ix, wk->player_number, SDL_GetTicksNS() - extra_entry_animation_init_ns);
+#endif
         break;
+#if defined(SF3_UWP)
+    }
+#endif
 
     case 1:
         char_move(&wk->wu);

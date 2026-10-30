@@ -1,4 +1,5 @@
 #include "port/resources.h"
+#include "port/uwp_diagnostics.h"
 #include "port/paths.h"
 #include "port/utils.h"
 #include "utils/sha256.h"
@@ -34,6 +35,7 @@ static void write_uwp_resource_check_log(const char* path,
                                          bool stream_closed,
                                          const char* stream_close_error,
                                          bool file_detected) {
+    if (!SF3_UWP_DIAGNOSTIC_DISK_LOGGING) return;
     const char* base_path = Paths_GetPrefPath();
     const char* data_path = Paths_GetDataPath();
     char* log_path = NULL;

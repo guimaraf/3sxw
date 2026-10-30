@@ -1,6 +1,9 @@
 #include "port/sound/emlShim.h"
 
 #include "common.h"
+#if defined(SF3_UWP)
+#include <SDL3/SDL.h>
+#endif
 #include "port/sound/list.h"
 #include "port/sound/spu.h"
 #include "sf33rd/AcrSDK/MiddleWare/PS2/CapSndEng/emlSndDrv.h"
@@ -447,12 +450,34 @@ static int doSeDrop(CSE_REQP* reqp) {
     return ret;
 }
 
+#if defined(SF3_UWP)
+static void trace_uwp_voice_start(Uint64 begin, Uint64 locked, int bank, int note, int result) {
+    static unsigned int records;
+    const Uint64 end = SDL_GetTicksNS();
+    if (end - begin >= 1000000 && records < 128) {
+        records++;
+        SDL_Log("[UWP_AUDIO] voice_start bank=%d note=%d result=%d lock_wait_ms=%.3f locked_work_ms=%.3f total_ms=%.3f",
+                bank, note, result, (double)(locked - begin) / 1e6,
+                (double)(end - locked) / 1e6, (double)(end - begin) / 1e6);
+    }
+}
+#endif
+
 void emlShimStartSound(CSE_SYS_PARAM_SNDSTART* param) {
     struct VWork* voice;
 
+#if defined(SF3_UWP)
+    const Uint64 begin_ns = SDL_GetTicksNS();
+#endif
     SDL_LockMutex(soundLock);
+#if defined(SF3_UWP)
+    const Uint64 locked_ns = SDL_GetTicksNS();
+#endif
     if (!doSeDrop(&param->reqp)) {
         SDL_UnlockMutex(soundLock);
+#if defined(SF3_UWP)
+        trace_uwp_voice_start(begin_ns, locked_ns, param->reqp.bank, param->reqp.note, 0);
+#endif
         return;
     }
 
@@ -460,6 +485,9 @@ void emlShimStartSound(CSE_SYS_PARAM_SNDSTART* param) {
     if (!voice) {
         printf("no free voices!\n");
         SDL_UnlockMutex(soundLock);
+#if defined(SF3_UWP)
+        trace_uwp_voice_start(begin_ns, locked_ns, param->reqp.bank, param->reqp.note, -1);
+#endif
         return;
     }
 
@@ -494,6 +522,9 @@ void emlShimStartSound(CSE_SYS_PARAM_SNDSTART* param) {
     SPU_VoiceStart(voice->voice_num, param->phdp.s_addr >> 1);
 
     SDL_UnlockMutex(soundLock);
+#if defined(SF3_UWP)
+    trace_uwp_voice_start(begin_ns, locked_ns, param->reqp.bank, param->reqp.note, 1);
+#endif
 }
 
 void emlShimSeKeyOff(CSE_REQP* pReqp) {

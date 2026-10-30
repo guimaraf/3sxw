@@ -2,9 +2,6 @@
 #include "port/config/keymap.h"
 
 #include <SDL3/SDL.h>
-#if defined(SF3_UWP)
-#include "port/sdl/sdl_app.h"
-#endif
 
 #define INPUT_SOURCES_MAX 2
 #define INPUT_AXIS_DEADZONE (SDL_MAX_SINT16 / 4)
@@ -92,6 +89,7 @@ static void remove_keyboard() {
 static void handle_gamepad_added_event(SDL_GamepadDeviceEvent* event) {
 #if defined(SF3_UWP)
     if (input_source_index_from_joystick_id(event->which) >= 0) {
+        SDL_Log("[UWP_PAD] duplicate_event instance=%u", (unsigned int)event->which);
         return;
     }
 #endif
@@ -111,6 +109,20 @@ static void handle_gamepad_added_event(SDL_GamepadDeviceEvent* event) {
         return;
     }
 
+#if defined(SF3_UWP)
+    const SDL_JoystickID opened_id = SDL_GetGamepadID(gamepad);
+    for (int i = 0; i < INPUT_SOURCES_MAX; i++) {
+        if (input_sources[i].type == SDLPAD_INPUT_GAMEPAD &&
+            (input_sources[i].gamepad.gamepad == gamepad ||
+             SDL_GetGamepadID(input_sources[i].gamepad.gamepad) == opened_id)) {
+            SDL_Log("[UWP_PAD] duplicate_open instance=%u existing_slot=%d", (unsigned int)opened_id, i);
+            SDL_CloseGamepad(gamepad);
+            setup_keyboard();
+            return;
+        }
+    }
+#endif
+
     for (int i = 0; i < INPUT_SOURCES_MAX; i++) {
         SDLPad_InputSource* input_source = &input_sources[i];
 
@@ -120,6 +132,13 @@ static void handle_gamepad_added_event(SDL_GamepadDeviceEvent* event) {
 
         input_source->type = SDLPAD_INPUT_GAMEPAD;
         input_source->gamepad.gamepad = gamepad;
+#if defined(SF3_UWP)
+        const char* pad_name = SDL_GetGamepadName(gamepad);
+        const char* pad_path = SDL_GetGamepadPath(gamepad);
+        SDL_Log("[UWP_PAD] assigned slot=%d instance=%u name=%s path=%s",
+                i, (unsigned int)SDL_GetGamepadID(gamepad),
+                pad_name ? pad_name : "(unknown)", pad_path ? pad_path : "(unavailable)");
+#endif
         wait_for_neutral[i] = true;
         break;
     }
@@ -138,6 +157,9 @@ static void handle_gamepad_removed_event(SDL_GamepadDeviceEvent* event) {
     }
 
     SDLPad_InputSource* input_source = &input_sources[index];
+#if defined(SF3_UWP)
+    SDL_Log("[UWP_PAD] removed slot=%d instance=%u", index, (unsigned int)event->which);
+#endif
     SDL_CloseGamepad(input_source->gamepad.gamepad);
     input_source->type = SDLPAD_INPUT_NONE;
     input_source->gamepad.gamepad = NULL;
@@ -366,12 +388,6 @@ void SDLPad_GetButtonState(int id, SDLPad_ButtonState* state) {
     } else if (id != keyboard_index) {
         handle_screenshot_chord(id, state);
     }
-#if defined(SF3_UWP)
-    if (id != keyboard_index) {
-        SDLApp_TraceUWPInputSample(input_sources[id].gamepad.gamepad, id,
-            input_enabled && !wait_for_neutral[id] && !screenshot_chord_active[id]);
-    }
-#endif
 }
 
 bool SDLPad_TakeScreenshotRequested() {

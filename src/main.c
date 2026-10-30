@@ -468,9 +468,6 @@ static void game_step_0(DebugStepStats* step_stats, DebugTaskStats* task_stats) 
     }
 
     appCopyKeyData();
-#if defined(SF3_UWP)
-    SDLApp_TraceUWPInputCopy(PLsw[0][0], PLsw[1][0]);
-#endif
     DebugLog_RecordInputState(0, io_w.data[0].sw, PLsw[0][0]);
     DebugLog_RecordInputState(1, io_w.data[1].sw, PLsw[1][0]);
     if (step_stats != NULL) {

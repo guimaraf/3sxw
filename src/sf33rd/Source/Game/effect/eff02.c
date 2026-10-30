@@ -6,6 +6,10 @@
 #include "sf33rd/Source/Game/effect/eff02.h"
 #include "bin2obj/char_table.h"
 #include "common.h"
+#if defined(SF3_UWP)
+#include "port/sdl/sdl_app.h"
+#endif
+
 #include "sf33rd/Source/Game/effect/effect.h"
 #include "sf33rd/Source/Game/engine/charset.h"
 #include "sf33rd/Source/Game/engine/pls02.h"
@@ -301,16 +305,31 @@ void effect_02_move(WORK_Other* ewk) {
 
 void urian_guard_se_check(WORK_Other* ewk, PLW* twk, u16 oto) {
     if (twk->player_number == 13 && (oto == 266 || oto == 267)) {
+#if defined(SF3_UWP)
+        const Uint64 sound_start_ns = SDL_GetTicksNS();
+#endif
         sound_effect_request[280](ewk, 280);
+#if defined(SF3_UWP)
+        SDLApp_RecordUWPCombatDetail("impact_sound", ewk->master_id, 280, 0, SDL_GetTicksNS() - sound_start_ns);
+#endif
         Last_Called_SE = 280;
         return;
     }
 
+#if defined(SF3_UWP)
+    const Uint64 sound_start_ns = SDL_GetTicksNS();
+#endif
     sound_effect_request[oto](ewk, oto);
+#if defined(SF3_UWP)
+    SDLApp_RecordUWPCombatDetail("impact_sound", ewk->master_id, oto, 0, SDL_GetTicksNS() - sound_start_ns);
+#endif
     Last_Called_SE = oto;
 }
 
 s32 effect_02_init(WORK* wk, s8 dmgp, s8 mkst, s8 dmrl) {
+#if defined(SF3_UWP)
+    const Uint64 impact_start_ns = SDL_GetTicksNS();
+#endif
     WORK_Other* ewk;
     WORK_Other* dwk;
     s16 ix;
@@ -363,5 +382,9 @@ s32 effect_02_init(WORK* wk, s8 dmgp, s8 mkst, s8 dmrl) {
     }
 
     ewk->wu.blink_timing = ewk->master_id;
+#if defined(SF3_UWP)
+    SDLApp_RecordUWPCombatDetail("impact_spawn", wk->id, wk->att.hit_mark, mkst, 0);
+    SDLApp_RecordUWPCombatDetail("impact_init", wk->id, wk->att.hit_mark, mkst, SDL_GetTicksNS() - impact_start_ns);
+#endif
     return 0;
 }

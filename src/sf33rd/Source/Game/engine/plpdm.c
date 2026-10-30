@@ -7,6 +7,9 @@
 #include "bin2obj/buttobi.h"
 #include "bin2obj/etc.h"
 #include "common.h"
+#if defined(SF3_UWP)
+#include "port/sdl/sdl_app.h"
+#endif
 #include "sf33rd/Source/Game/effect/effa7.h"
 #include "sf33rd/Source/Game/effect/effd9.h"
 #include "sf33rd/Source/Game/effect/effe2.h"
@@ -176,10 +179,24 @@ const u16 exdm_ix_data[2][20][5] = {
 };
 
 void Player_damage(PLW* wk) {
+#if defined(SF3_UWP)
+    const int damage_flags_state = ((unsigned int)wk->wu.routine_no[2] << 8) | (unsigned int)wk->wu.routine_no[3];
+    const Uint64 damage_flags_start = SDL_GetTicksNS();
+#endif
     setup_damage_process_flags(wk);
+#if defined(SF3_UWP)
+    SDLApp_RecordUWPCombatDetail("damage_flags", wk->wu.id, damage_flags_state, wk->player_number, SDL_GetTicksNS() - damage_flags_start);
+#endif
 
     if (wk->wu.routine_no[3] == 0) {
+#if defined(SF3_UWP)
+        const int damage_reaction_data_state = ((unsigned int)wk->wu.routine_no[2] << 8) | (unsigned int)wk->wu.routine_no[3];
+        const Uint64 damage_reaction_data_start = SDL_GetTicksNS();
+#endif
         get_damage_reaction_data(wk);
+#if defined(SF3_UWP)
+        SDLApp_RecordUWPCombatDetail("damage_reaction_data", wk->wu.id, damage_reaction_data_state, wk->player_number, SDL_GetTicksNS() - damage_reaction_data_start);
+#endif
 
         if (wk->wu.dm_koa & 0x980) {
             wk->ukemi_ok_timer = 0;
@@ -189,17 +206,45 @@ void Player_damage(PLW* wk) {
 
         wk->uot_cd_ok_flag = 0;
         wk->ukemi_success = 0;
+#if defined(SF3_UWP)
+        const int damage_bullet_state = ((unsigned int)wk->wu.routine_no[2] << 8) | (unsigned int)wk->wu.routine_no[3];
+        const Uint64 damage_bullet_start = SDL_GetTicksNS();
+#endif
         check_bullet_damage(wk);
+#if defined(SF3_UWP)
+        SDLApp_RecordUWPCombatDetail("damage_bullet", wk->wu.id, damage_bullet_state, wk->player_number, SDL_GetTicksNS() - damage_bullet_start);
+#endif
+#if defined(SF3_UWP)
+        const int damage_chain_state = ((unsigned int)wk->wu.routine_no[2] << 8) | (unsigned int)wk->wu.routine_no[3];
+        const Uint64 damage_chain_start = SDL_GetTicksNS();
+#endif
         clear_chainex_check(wk->wu.id);
+#if defined(SF3_UWP)
+        SDLApp_RecordUWPCombatDetail("damage_chain", wk->wu.id, damage_chain_state, wk->player_number, SDL_GetTicksNS() - damage_chain_start);
+#endif
     }
 
     if (wk->atemi_flag == 9) {
         wk->atemi_flag = 0;
     } else {
+#if defined(SF3_UWP)
+        const int damage_handler_state = ((unsigned int)wk->wu.routine_no[2] << 8) | (unsigned int)wk->wu.routine_no[3];
+        const Uint64 damage_handler_start = SDL_GetTicksNS();
+#endif
         plpdm_lv_00[(wk->wu.routine_no[2])](wk);
+#if defined(SF3_UWP)
+        SDLApp_RecordUWPCombatDetail("damage_handler", wk->wu.id, damage_handler_state, wk->player_number, SDL_GetTicksNS() - damage_handler_start);
+#endif
     }
 
+#if defined(SF3_UWP)
+    const int damage_hitstop_state = ((unsigned int)wk->wu.routine_no[2] << 8) | (unsigned int)wk->wu.routine_no[3];
+    const Uint64 damage_hitstop_start = SDL_GetTicksNS();
+#endif
     set_hit_stop_hit_quake(&wk->wu);
+#if defined(SF3_UWP)
+    SDLApp_RecordUWPCombatDetail("damage_hitstop", wk->wu.id, damage_hitstop_state, wk->player_number, SDL_GetTicksNS() - damage_hitstop_start);
+#endif
 }
 
 void setup_damage_process_flags(PLW* wk) {

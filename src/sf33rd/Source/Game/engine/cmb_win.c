@@ -5,6 +5,10 @@
 
 #include "sf33rd/Source/Game/engine/cmb_win.h"
 #include "common.h"
+#if defined(SF3_UWP)
+#include "port/sdl/sdl_app.h"
+#endif
+
 #include "sf33rd/Source/Game/effect/effect.h"
 #include "sf33rd/Source/Game/engine/grade.h"
 #include "sf33rd/Source/Game/engine/plcnt.h"
@@ -133,7 +137,14 @@ void combo_control(s8 PL) {
         if (!paring_check(PL) && plw[PL].combo_type.total) {
             if (first_attack == 0) {
                 first_attack = plw[PL].wu.id + 1;
+#if defined(SF3_UWP)
+                SDLApp_RecordUWPCombatDetail("first_attack", PL, plw[PL].player_number, first_attack, 0);
+                const Uint64 notice_start_ns = SDL_GetTicksNS();
+#endif
                 combo_window_push(PL, 4);
+#if defined(SF3_UWP)
+                SDLApp_RecordUWPCombatDetail("first_attack_notice", PL, 4, 0, SDL_GetTicksNS() - notice_start_ns);
+#endif
                 return;
             }
 

@@ -5,6 +5,9 @@
 
 #include "sf33rd/Source/Game/engine/plcnt.h"
 #include "common.h"
+#if defined(SF3_UWP)
+#include "port/sdl/sdl_app.h"
+#endif
 #include "constants.h"
 #include "main.h"
 #include "sf33rd/Source/Game/animation/win_pl.h"
@@ -395,6 +398,9 @@ const s16** kizetsu_timer_table[9] = { tsuujyou_dageki,   hissatsu_dageki,   tsu
                                        super_arts_dageki, super_arts_nage,   super_arts_dageki };
 
 void Player_control() {
+#if defined(SF3_UWP)
+    Uint64 phase_start_ns = SDL_GetTicksNS();
+#endif
     pulpul_scene = 1;
 
     if (pcon_rno[0] + pcon_rno[1] != 0) {
@@ -420,7 +426,14 @@ void Player_control() {
     players_timer++;
     players_timer &= 0x7FFF;
     set_scrrrl();
+#if defined(SF3_UWP)
+    SDLApp_RecordUWPCombatDetail("players_setup", -1, pcon_rno[0], pcon_rno[1], SDL_GetTicksNS() - phase_start_ns);
+    phase_start_ns = SDL_GetTicksNS();
+#endif
     player_main_process[pcon_rno[0]]();
+#if defined(SF3_UWP)
+    SDLApp_RecordUWPCombatDetail("players_dispatch", -1, pcon_rno[0], pcon_rno[1], SDL_GetTicksNS() - phase_start_ns);
+#endif
     check_body_touch();
     check_damage_hosei();
     set_quake(&plw[0]);
@@ -434,13 +447,25 @@ void Player_control() {
         hit_push_request(&plw[1].wu);
     }
 
+#if defined(SF3_UWP)
+    phase_start_ns = SDL_GetTicksNS();
+#endif
     add_next_position(&plw[0]);
     add_next_position(&plw[1]);
     check_cg_zoom();
+#if defined(SF3_UWP)
+    SDLApp_RecordUWPCombatDetail("players_position", -1, 0, 0, SDL_GetTicksNS() - phase_start_ns);
+#endif
 
 end:
     if (Game_pause != 0x81) {
+#if defined(SF3_UWP)
+        phase_start_ns = SDL_GetTicksNS();
+#endif
         store_player_after_image_data();
+#if defined(SF3_UWP)
+        SDLApp_RecordUWPCombatDetail("players_afterimage", -1, 0, 0, SDL_GetTicksNS() - phase_start_ns);
+#endif
     }
 }
 

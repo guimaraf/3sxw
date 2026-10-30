@@ -410,11 +410,28 @@ void SPU_Upload(u32 dst, void* src, u32 size) {
     const bool record_timing = DebugLog_IsEnabled();
     const Uint64 start_ns = record_timing ? SDL_GetTicksNS() : 0;
 
+#if defined(SF3_UWP)
+    const Uint64 upload_begin_ns = SDL_GetTicksNS();
+#endif
     SDL_LockMutex(soundLock);
+#if defined(SF3_UWP)
+    const Uint64 upload_locked_ns = SDL_GetTicksNS();
+#endif
 
     memcpy(&ram[dst >> 1], src, size);
 
     SDL_UnlockMutex(soundLock);
+#if defined(SF3_UWP)
+    static unsigned int upload_records;
+    const Uint64 upload_end_ns = SDL_GetTicksNS();
+    if (upload_end_ns - upload_begin_ns >= 1000000 && upload_records < 128) {
+        upload_records++;
+        SDL_Log("[UWP_AUDIO] spu_upload dst=%u bytes=%u lock_wait_ms=%.3f locked_work_ms=%.3f total_ms=%.3f",
+                dst, size, (double)(upload_locked_ns - upload_begin_ns) / 1e6,
+                (double)(upload_end_ns - upload_locked_ns) / 1e6,
+                (double)(upload_end_ns - upload_begin_ns) / 1e6);
+    }
+#endif
 
     if (record_timing) {
         DebugLog_RecordSpuUpload(size, (double)(SDL_GetTicksNS() - start_ns) / 1e6);

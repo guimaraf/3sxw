@@ -5,6 +5,9 @@
 
 #include "sf33rd/Source/Game/engine/plpat.h"
 #include "common.h"
+#if defined(SF3_UWP)
+#include "port/sdl/sdl_app.h"
+#endif
 #include "sf33rd/Source/Game/effect/effg6.h"
 #include "sf33rd/Source/Game/engine/charset.h"
 #include "sf33rd/Source/Game/engine/grade.h"
@@ -50,7 +53,22 @@ const u8* cjdr_hits_table[20];
 const u8* cjdr_blocking_table[20];
 const u8* cjdr_defense_table[20];
 
+#if defined(SF3_UWP)
+#define UWP_ATTACK_CALL(kind, call) do { \
+    const int attack_state = (wk->wu.routine_no[2] << 8) | wk->wu.routine_no[3]; \
+    const Uint64 attack_call_ns = SDL_GetTicksNS(); \
+    call; \
+    SDLApp_RecordUWPCombatDetail(kind, wk->wu.id, attack_state, wk->player_number, SDL_GetTicksNS() - attack_call_ns); \
+} while (0)
+#else
+#define UWP_ATTACK_CALL(kind, call) call
+#endif
+
 void Player_attack(PLW* wk) {
+#if defined(SF3_UWP)
+    const Uint64 attack_begin_ns = SDL_GetTicksNS();
+    const int attack_entry_state = (wk->wu.routine_no[2] << 8) | wk->wu.routine_no[3];
+#endif
     wk->wu.next_z = wk->wu.my_priority;
     wk->running_f = 0;
     wk->py->flag = 0;
@@ -70,7 +88,14 @@ void Player_attack(PLW* wk) {
     wk->hazusenai_flag = 0;
     wk->cat_break_reserve = 0;
     wk->wu.swallow_no_effect = 0;
+#if defined(SF3_UWP)
+    const int attack_power_off_state = (wk->wu.routine_no[2] << 8) | wk->wu.routine_no[3];
+    const Uint64 attack_power_off_ns = SDL_GetTicksNS();
+#endif
     check_em_tk_power_off(wk, (PLW*)wk->wu.target_adrs);
+#if defined(SF3_UWP)
+    SDLApp_RecordUWPCombatDetail("attack_power_off", wk->wu.id, attack_power_off_state, wk->player_number, SDL_GetTicksNS() - attack_power_off_ns);
+#endif
 
     if (wk->wu.routine_no[3] == 0) {
         wk->caution_flag = 1;
@@ -80,20 +105,60 @@ void Player_attack(PLW* wk) {
         wk->hsjp_ok = 0;
 
         if (wk->wu.routine_no[2] < 16) {
+#if defined(SF3_UWP)
+            const int attack_chain_reset_state = (wk->wu.routine_no[2] << 8) | wk->wu.routine_no[3];
+            const Uint64 attack_chain_reset_ns = SDL_GetTicksNS();
+#endif
             clear_chainex_check(wk->wu.id);
+#if defined(SF3_UWP)
+            SDLApp_RecordUWPCombatDetail("attack_chain_reset", wk->wu.id, attack_chain_reset_state, wk->player_number, SDL_GetTicksNS() - attack_chain_reset_ns);
+#endif
         }
     } else {
+#if defined(SF3_UWP)
+        const int attack_feedback_state = (wk->wu.routine_no[2] << 8) | wk->wu.routine_no[3];
+        const Uint64 attack_feedback_ns = SDL_GetTicksNS();
+#endif
         pp_pulpara_remake_at(wk);
+#if defined(SF3_UWP)
+        SDLApp_RecordUWPCombatDetail("attack_feedback", wk->wu.id, attack_feedback_state, wk->player_number, SDL_GetTicksNS() - attack_feedback_ns);
+#endif
     }
 
+#if defined(SF3_UWP)
+    const int attack_guard_state = (wk->wu.routine_no[2] << 8) | wk->wu.routine_no[3];
+    const Uint64 attack_guard_ns = SDL_GetTicksNS();
+#endif
     jumping_guard_type_check(wk);
+#if defined(SF3_UWP)
+    SDLApp_RecordUWPCombatDetail("attack_guard", wk->wu.id, attack_guard_state, wk->player_number, SDL_GetTicksNS() - attack_guard_ns);
+#endif
 
     if (wk->wu.routine_no[2] > 15) {
+#if defined(SF3_UWP)
+        const int attack_extra_routine_state = (wk->wu.routine_no[2] << 8) | wk->wu.routine_no[3];
+        const bool trace_entry = (wk->player_number == 6 || wk->player_number == 11) &&
+                                 attack_extra_routine_state == 0x1000;
+        if (trace_entry) SDLApp_UWPAttackTraceBegin(wk->player_number, wk->wu.id);
+        const Uint64 attack_extra_routine_ns = SDL_GetTicksNS();
+#endif
         plxx_extra_attack_table[wk->player_number](wk);
+#if defined(SF3_UWP)
+        const Uint64 attack_extra_elapsed_ns = SDL_GetTicksNS() - attack_extra_routine_ns;
+        if (trace_entry) SDLApp_UWPAttackTraceEnd();
+        SDLApp_RecordUWPCombatDetail("attack_extra_routine", wk->wu.id, attack_extra_routine_state, wk->player_number, attack_extra_elapsed_ns);
+#endif
     } else {
         wk->sa->saeff_ok = 0;
         wk->sa->saeff_mp = 0;
+#if defined(SF3_UWP)
+        const int attack_routine_state = (wk->wu.routine_no[2] << 8) | wk->wu.routine_no[3];
+        const Uint64 attack_routine_ns = SDL_GetTicksNS();
+#endif
         plpat_lv_00[wk->wu.routine_no[2]](wk);
+#if defined(SF3_UWP)
+        SDLApp_RecordUWPCombatDetail("attack_routine", wk->wu.id, attack_routine_state, wk->player_number, SDL_GetTicksNS() - attack_routine_ns);
+#endif
     }
 
     wk->wu.next_z = ((PLW*)wk->wu.target_adrs)->wu.my_priority - 3;
@@ -105,6 +170,9 @@ void Player_attack(PLW* wk) {
             wk->wu.next_z -= 4;
         }
     }
+#if defined(SF3_UWP)
+    SDLApp_RecordUWPCombatDetail("attack_total", wk->wu.id, attack_entry_state, wk->player_number, SDL_GetTicksNS() - attack_begin_ns);
+#endif
 }
 
 void Attack_00000(PLW* wk) {
@@ -113,15 +181,15 @@ void Attack_00000(PLW* wk) {
     switch (wk->wu.routine_no[3]) {
     case 0:
         wk->wu.routine_no[3]++;
-        hoken_muriyari_chakuchi(wk);
+        UWP_ATTACK_CALL("attack_landing", hoken_muriyari_chakuchi(wk));
         wk->wu.rl_flag = wk->wu.rl_waza;
-        setup_lvdir_after_autodir(wk);
-        get_cancel_timer(wk);
-        set_char_move_init(&wk->wu, 4, wk->as->char_ix);
+        UWP_ATTACK_CALL("attack_direction", setup_lvdir_after_autodir(wk));
+        UWP_ATTACK_CALL("attack_cancel_timer", get_cancel_timer(wk));
+        UWP_ATTACK_CALL("attack_animation_init", set_char_move_init(&wk->wu, 4, wk->as->char_ix));
         break;
 
     case 1:
-        char_move(&wk->wu);
+        UWP_ATTACK_CALL("attack_animation", char_move(&wk->wu));
 
         if (wk->wu.cg_type == 20) {
             wk->wu.routine_no[2] = 4;
@@ -137,16 +205,16 @@ void Attack_01000(PLW* wk) {
     switch (wk->wu.routine_no[3]) {
     case 0:
         wk->wu.routine_no[3]++;
-        hoken_muriyari_chakuchi(wk);
+        UWP_ATTACK_CALL("attack_landing", hoken_muriyari_chakuchi(wk));
         wk->wu.rl_flag = wk->wu.rl_waza;
-        setup_lvdir_after_autodir(wk);
-        get_cancel_timer(wk);
-        set_char_move_init(&wk->wu, 4, wk->as->char_ix);
+        UWP_ATTACK_CALL("attack_direction", setup_lvdir_after_autodir(wk));
+        UWP_ATTACK_CALL("attack_cancel_timer", get_cancel_timer(wk));
+        UWP_ATTACK_CALL("attack_animation_init", set_char_move_init(&wk->wu, 4, wk->as->char_ix));
         setup_mvxy_data(&wk->wu, wk->as->data_ix);
         break;
 
     case 1:
-        char_move(&wk->wu);
+        UWP_ATTACK_CALL("attack_animation", char_move(&wk->wu));
 
         if (wk->wu.cg_type == 1) {
             add_mvxy_speed(&wk->wu);
@@ -162,7 +230,7 @@ void Attack_01000(PLW* wk) {
         break;
 
     case 3:
-        char_move(&wk->wu);
+        UWP_ATTACK_CALL("attack_animation", char_move(&wk->wu));
         break;
     }
 }
@@ -171,16 +239,16 @@ void Attack_02000(PLW* wk) {
     switch (wk->wu.routine_no[3]) {
     case 0:
         wk->wu.routine_no[3]++;
-        hoken_muriyari_chakuchi(wk);
+        UWP_ATTACK_CALL("attack_landing", hoken_muriyari_chakuchi(wk));
         wk->wu.rl_flag = wk->wu.rl_waza;
-        setup_lvdir_after_autodir(wk);
-        get_cancel_timer(wk);
-        set_char_move_init(&wk->wu, 4, wk->as->char_ix);
+        UWP_ATTACK_CALL("attack_direction", setup_lvdir_after_autodir(wk));
+        UWP_ATTACK_CALL("attack_cancel_timer", get_cancel_timer(wk));
+        UWP_ATTACK_CALL("attack_animation_init", set_char_move_init(&wk->wu, 4, wk->as->char_ix));
         setup_mvxy_data(&wk->wu, wk->as->data_ix);
         break;
 
     case 1:
-        char_move(&wk->wu);
+        UWP_ATTACK_CALL("attack_animation", char_move(&wk->wu));
 
         if (wk->wu.cg_type == 1) {
             add_mvxy_speed(&wk->wu);
@@ -197,7 +265,7 @@ void Attack_02000(PLW* wk) {
         /* fallthrough */
 
     case 3:
-        char_move(&wk->wu);
+        UWP_ATTACK_CALL("attack_animation", char_move(&wk->wu));
 
         if (wk->wu.cg_type == 1) {
             reset_mvxy_data(&wk->wu);
@@ -212,15 +280,15 @@ void Attack_03000(PLW* wk) {
     switch (wk->wu.routine_no[3]) {
     case 0:
         wk->wu.routine_no[3]++;
-        get_cancel_timer(wk);
+        UWP_ATTACK_CALL("attack_cancel_timer", get_cancel_timer(wk));
         if ((Bonus_Game_Flag == 20 && wk->bs2_on_car) || (wk->wu.xyz[1].disp.pos <= 0)) {
-            hoken_muriyari_chakuchi(wk);
+            UWP_ATTACK_CALL("attack_landing", hoken_muriyari_chakuchi(wk));
             wk->wu.rl_flag = wk->wu.rl_waza;
-            setup_lvdir_after_autodir(wk);
+            UWP_ATTACK_CALL("attack_direction", setup_lvdir_after_autodir(wk));
             Normal_18000_init_unit(wk, wk->wu.pat_status);
         }
 
-        set_char_move_init(&wk->wu, 4, wk->as->char_ix);
+        UWP_ATTACK_CALL("attack_animation_init", set_char_move_init(&wk->wu, 4, wk->as->char_ix));
         break;
 
     case 1:
@@ -252,7 +320,7 @@ void Attack_03000(PLW* wk) {
         break;
 
     case 3:
-        char_move(&wk->wu);
+        UWP_ATTACK_CALL("attack_animation", char_move(&wk->wu));
         break;
     }
 }
@@ -395,15 +463,15 @@ void Attack_04000(PLW* wk) {
     switch (wk->wu.routine_no[3]) {
     case 0:
         wk->wu.routine_no[3]++;
-        hoken_muriyari_chakuchi(wk);
+        UWP_ATTACK_CALL("attack_landing", hoken_muriyari_chakuchi(wk));
         wk->wu.rl_flag = wk->wu.rl_waza;
-        setup_lvdir_after_autodir(wk);
-        get_cancel_timer(wk);
-        set_char_move_init(&wk->wu, 4, wk->as->char_ix);
+        UWP_ATTACK_CALL("attack_direction", setup_lvdir_after_autodir(wk));
+        UWP_ATTACK_CALL("attack_cancel_timer", get_cancel_timer(wk));
+        UWP_ATTACK_CALL("attack_animation_init", set_char_move_init(&wk->wu, 4, wk->as->char_ix));
         break;
 
     case 1:
-        char_move(&wk->wu);
+        UWP_ATTACK_CALL("attack_animation", char_move(&wk->wu));
 
         if (wk->wu.cg_type == 20) {
             wk->wu.routine_no[2] = 1;
@@ -419,13 +487,13 @@ void Attack_05000(PLW* wk) {
     switch (wk->wu.routine_no[3]) {
     case 0:
         wk->wu.rl_flag = wk->wu.rl_waza;
-        set_char_move_init(&wk->wu, 5, wk->as->char_ix);
+        UWP_ATTACK_CALL("attack_animation_init", set_char_move_init(&wk->wu, 5, wk->as->char_ix));
 
         if (wk->wu.xyz[1].disp.pos > 0) {
             wk->wu.routine_no[3] = 2;
             char_move_wca(&wk->wu);
         } else {
-            hoken_muriyari_chakuchi(wk);
+            UWP_ATTACK_CALL("attack_landing", hoken_muriyari_chakuchi(wk));
             wk->wu.routine_no[3] = 1;
         }
 
@@ -433,7 +501,7 @@ void Attack_05000(PLW* wk) {
         break;
 
     case 1:
-        char_move(&wk->wu);
+        UWP_ATTACK_CALL("attack_animation", char_move(&wk->wu));
 
         if (wk->wu.cg_type == 1) {
             add_mvxy_speed(&wk->wu);
@@ -450,7 +518,7 @@ void Attack_05000(PLW* wk) {
         break;
 
     case 3:
-        char_move(&wk->wu);
+        UWP_ATTACK_CALL("attack_animation", char_move(&wk->wu));
         break;
     }
 }
@@ -464,9 +532,9 @@ void Attack_07000(PLW* wk) {
     switch (wk->wu.routine_no[3]) {
     case 0:
         wk->wu.routine_no[3]++;
-        hoken_muriyari_chakuchi(wk);
-        get_cancel_timer(wk);
-        set_char_move_init(&wk->wu, 5, wk->as->char_ix);
+        UWP_ATTACK_CALL("attack_landing", hoken_muriyari_chakuchi(wk));
+        UWP_ATTACK_CALL("attack_cancel_timer", get_cancel_timer(wk));
+        UWP_ATTACK_CALL("attack_animation_init", set_char_move_init(&wk->wu, 5, wk->as->char_ix));
 
         if (wk->wu.cg_type == 20) {
             wk->wu.cg_type = 0;
@@ -477,7 +545,7 @@ void Attack_07000(PLW* wk) {
         break;
 
     case 1:
-        char_move(&wk->wu);
+        UWP_ATTACK_CALL("attack_animation", char_move(&wk->wu));
 
         if (wk->wu.cg_type == 20) {
             wk->wu.cg_type = 0;
@@ -508,13 +576,13 @@ void Attack_08000(PLW* wk) {
             setup_mvxy_data(&wk->wu, ixx);
         }
 
-        get_cancel_timer(wk);
-        set_char_move_init(&wk->wu, 4, (s16)((wk->as->char_ix)));
+        UWP_ATTACK_CALL("attack_cancel_timer", get_cancel_timer(wk));
+        UWP_ATTACK_CALL("attack_animation_init", set_char_move_init(&wk->wu, 4, (s16)((wk->as->char_ix))));
         wk->wu.mvxy.index = wk->as->data_ix;
         break;
 
     case 1:
-        char_move(&wk->wu);
+        UWP_ATTACK_CALL("attack_animation", char_move(&wk->wu));
 
         if (wk->wu.cg_type == 1) {
             wk->wu.routine_no[3]++;
@@ -542,7 +610,7 @@ void Attack_08000(PLW* wk) {
         break;
 
     case 3:
-        char_move(&wk->wu);
+        UWP_ATTACK_CALL("attack_animation", char_move(&wk->wu));
         break;
     }
 }
@@ -551,9 +619,9 @@ void Attack_09000(PLW* wk) {
     switch (wk->wu.routine_no[3]) {
     case 0:
         wk->wu.routine_no[3]++;
-        hoken_muriyari_chakuchi(wk);
-        get_cancel_timer(wk);
-        set_char_move_init(&wk->wu, 5, wk->as->char_ix);
+        UWP_ATTACK_CALL("attack_landing", hoken_muriyari_chakuchi(wk));
+        UWP_ATTACK_CALL("attack_cancel_timer", get_cancel_timer(wk));
+        UWP_ATTACK_CALL("attack_animation_init", set_char_move_init(&wk->wu, 5, wk->as->char_ix));
         setup_mvxy_data(&wk->wu, wk->as->data_ix);
 
         if (wk->wu.cg_type == 20) {
@@ -565,7 +633,7 @@ void Attack_09000(PLW* wk) {
         break;
 
     case 1:
-        char_move(&wk->wu);
+        UWP_ATTACK_CALL("attack_animation", char_move(&wk->wu));
 
         if (wk->wu.cg_type == 20) {
             wk->wu.cg_type = 0;
@@ -586,7 +654,7 @@ void Attack_09000(PLW* wk) {
         break;
 
     case 3:
-        char_move(&wk->wu);
+        UWP_ATTACK_CALL("attack_animation", char_move(&wk->wu));
         break;
     }
 }
@@ -595,9 +663,9 @@ void Attack_10000(PLW* wk) {
     switch (wk->wu.routine_no[3]) {
     case 0:
         wk->wu.routine_no[3]++;
-        hoken_muriyari_chakuchi(wk);
+        UWP_ATTACK_CALL("attack_landing", hoken_muriyari_chakuchi(wk));
         wk->wu.rl_flag = wk->wu.rl_waza;
-        set_char_move_init(&wk->wu, 5, wk->as->char_ix);
+        UWP_ATTACK_CALL("attack_animation_init", set_char_move_init(&wk->wu, 5, wk->as->char_ix));
         setup_mvxy_data(&wk->wu, wk->as->data_ix);
         wk->cancel_timer = 0;
         wk->wu.dir_timer = 3;
@@ -610,7 +678,7 @@ void Attack_10000(PLW* wk) {
         break;
 
     case 1:
-        char_move(&wk->wu);
+        UWP_ATTACK_CALL("attack_animation", char_move(&wk->wu));
         if (wk->wu.cg_type != 20) {
             break;
         }
@@ -656,7 +724,7 @@ void Attack_10000(PLW* wk) {
         break;
 
     case 5:
-        char_move(&wk->wu);
+        UWP_ATTACK_CALL("attack_animation", char_move(&wk->wu));
         break;
     }
 }
@@ -666,15 +734,15 @@ void Attack_14000(PLW* wk) {
     switch (wk->wu.routine_no[3]) {
     case 0:
         wk->wu.routine_no[3]++;
-        hoken_muriyari_chakuchi(wk);
+        UWP_ATTACK_CALL("attack_landing", hoken_muriyari_chakuchi(wk));
         wk->wu.rl_flag = wk->wu.rl_waza;
         wk->cat_break_ok_timer = 6;
-        setup_lvdir_after_autodir(wk);
-        set_char_move_init(&wk->wu, 4, wk->as->char_ix);
+        UWP_ATTACK_CALL("attack_direction", setup_lvdir_after_autodir(wk));
+        UWP_ATTACK_CALL("attack_animation_init", set_char_move_init(&wk->wu, 4, wk->as->char_ix));
         break;
 
     case 1:
-        char_move(&wk->wu);
+        UWP_ATTACK_CALL("attack_animation", char_move(&wk->wu));
         break;
     }
 
@@ -690,13 +758,13 @@ void Attack_15000(PLW* wk) {
 
         if (wk->wu.xyz[1].disp.pos <= 0) {
             wk->wu.rl_flag = wk->wu.rl_waza;
-            setup_lvdir_after_autodir(wk);
+            UWP_ATTACK_CALL("attack_direction", setup_lvdir_after_autodir(wk));
             wk->wu.xyz[1].disp.pos = 0;
             Normal_18000_init_unit(wk, wk->wu.pat_status);
         }
 
         wk->cat_break_ok_timer = 6;
-        set_char_move_init(&wk->wu, 4, wk->as->char_ix);
+        UWP_ATTACK_CALL("attack_animation_init", set_char_move_init(&wk->wu, 4, wk->as->char_ix));
 
         if (wk->cat_break_ok_timer) {
             wk->cat_break_reserve = 1;
@@ -729,7 +797,7 @@ void Attack_15000(PLW* wk) {
         break;
 
     case 3:
-        char_move(&wk->wu);
+        UWP_ATTACK_CALL("attack_animation", char_move(&wk->wu));
         break;
     }
 }
