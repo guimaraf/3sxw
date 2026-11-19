@@ -1,5 +1,7 @@
 # 3SXW
 
+[![Verified developer on RecompStore](https://recompstore.com/assets/press/verified-dark.svg)](https://recompstore.com/dev/guimaraf)
+
 A port of the greatest fighting game of all time for modern platforms - fork with fixes and improvements.
 
 > **This is a hard fork of [3SX](https://github.com/crowded-street/3sx)**, the original Street Fighter III: 3rd Strike PC port project.
@@ -175,6 +177,8 @@ This project uses:
 ---
 
 # 3SXW
+
+[![Verified developer on RecompStore](https://recompstore.com/assets/press/verified-dark.svg)](https://recompstore.com/dev/guimaraf)
 
 Um port do maior jogo de luta de todos os tempos para plataformas modernas - fork com correcoes e melhorias.
 
